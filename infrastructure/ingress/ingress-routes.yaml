@@ -4,9 +4,15 @@ metadata:
   name: uptime-kuma-ingress
   namespace: monitoring
   annotations:
+    cert-manager.io/cluster-issuer: homelab-ca-issuer
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: nginx
+  tls:
+  - hosts:
+    - kuma.10.0.0.170.nip.io
+    - kuma.homelab.local
+    secretName: uptime-kuma-tls
   rules:
   - host: kuma.homelab.local
     http:
@@ -35,9 +41,15 @@ metadata:
   name: hello-talos-ingress
   namespace: default
   annotations:
+    cert-manager.io/cluster-issuer: homelab-ca-issuer
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: nginx
+  tls:
+  - hosts:
+    - hello.10.0.0.170.nip.io
+    - hello.homelab.local
+    secretName: hello-talos-tls
   rules:
   - host: hello.homelab.local
     http:
