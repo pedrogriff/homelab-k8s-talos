@@ -4,6 +4,7 @@
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
 [![Ingress](https://img.shields.io/badge/NGINX_Ingress-v1.12.0-009639?logo=nginx&logoColor=white)](https://kubernetes.github.io/ingress-nginx/)
+[![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
 A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**.
@@ -24,8 +25,18 @@ flowchart TD
             API["Talos gRPC API (:50000)"]
             K8sCP["Kubernetes Control Plane (:6443)<br/>(etcd, kube-apiserver, kubelet)"]
             
-            subgraph Networking["Layer 7 Traffic Routing"]
+            subgraph Security["Automated PKI & TLS Security"]
+                CM["cert-manager Controller (v1.17)"]
+                CA["Homelab Root CA (10-Year Root CA)"]
+                Issuer["ClusterIssuer (`homelab-ca-issuer`)"]
+                CM --> CA --> Issuer
+            end
+
+            subgraph Networking["Layer 7 Traffic Routing (HTTPS)"]
                 Ingress["NGINX Ingress Controller (:80 / :443)"]
+                TLSCert["Secret: `uptime-kuma-tls`<br/>(Auto-issued & Renewed)"]
+                Issuer -.->|"Signs TLS Cert"| TLSCert
+                TLSCert -.->|"Provides SSL"| Ingress
             end
             
             subgraph Storage["Persistent Storage Layer"]
@@ -42,8 +53,8 @@ flowchart TD
     Admin -->|"talosctl (:50000)"| API
     Admin -->|"kubectl (:6443)"| K8sCP
     
-    Browser["Web Browser / Client"] -->|"http://kuma.10.0.0.170.nip.io"| Ingress
-    Browser -->|"http://hello.10.0.0.170.nip.io"| Ingress
+    Browser["Web Browser / Client"] -->|"https://kuma.10.0.0.170.nip.io (HTTPS :443)"| Ingress
+    Browser -->|"https://hello.10.0.0.170.nip.io (HTTPS :443)"| Ingress
     
     Ingress -->|"Routes to :3001"| Kuma
     Ingress -->|"Routes to :80"| Demo
@@ -69,6 +80,10 @@ flowchart TD
 * Eliminates awkward 5-digit NodePort numbers (`:30080`, `:30001`).
 * Routes incoming HTTP/HTTPS traffic at Layer 7 based on hostname matching (`Host: kuma.homelab.local`, `Host: kuma.10.0.0.170.nip.io`).
 
+### 4. Why Automated PKI with `cert-manager`?
+* Replaces error-prone manual SSL/TLS certificate creation and renewal with Kubernetes Custom Resource Definitions (CRDs).
+* Deploys a **2-Tier PKI**: A 10-year self-signed Root Certificate Authority generates an intermediate `ClusterIssuer` that signs and auto-renews 90-day application certificates on the fly.
+
 ---
 
 ## 📂 Repository Structure
@@ -80,11 +95,14 @@ flowchart TD
 │   ├── controlplane.example.yaml   # Template config for Control Plane nodes
 │   └── worker.example.yaml         # Template config for scaling Worker nodes
 ├── infrastructure/                 # Core Cluster Infrastructure
+│   ├── certificates/
+│   │   ├── cert-manager.yaml       # cert-manager deployment & CRDs (v1.17)
+│   │   └── cluster-issuer.yaml     # 2-Tier PKI Root CA & ClusterIssuer
 │   ├── storage/
 │   │   └── local-path-storage.yaml # Local Path Provisioner (StorageClass: local-path)
 │   └── ingress/
 │       ├── ingress-nginx.yaml      # NGINX Ingress Controller deployment
-│       └── ingress-routes.yaml     # Layer 7 Ingress routing rules
+│       └── ingress-routes.yaml     # Layer 7 Ingress routing rules with TLS
 └── apps/                           # Deployed Application Workloads
     ├── monitoring/
     │   └── uptime-kuma.yaml        # Uptime Kuma monitoring (StatefulSet/PVC)
@@ -117,12 +135,16 @@ talosctl --talosconfig ./talosconfig bootstrap
 talosctl --talosconfig ./talosconfig kubeconfig .
 ```
 
-### 3. Deploying Core Infrastructure & Workloads
+### 3. Deploying Core Infrastructure, PKI & Workloads
 ```bash
 # Deploy persistent storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
 
-# Deploy NGINX Ingress Controller & Routing
+# Deploy cert-manager & PKI ClusterIssuers
+kubectl apply -f infrastructure/certificates/cert-manager.yaml
+kubectl apply -f infrastructure/certificates/cluster-issuer.yaml
+
+# Deploy NGINX Ingress Controller & TLS Routing
 kubectl apply -f infrastructure/ingress/ingress-nginx.yaml
 kubectl apply -f infrastructure/ingress/ingress-routes.yaml
 
@@ -150,6 +172,7 @@ kubectl apply -f apps/monitoring/uptime-kuma.yaml
 | **Talos System Services** | `talosctl --talosconfig talosconfig service` |
 | **Inspect Kubernetes Pods** | `kubectl get pods -A -o wide` |
 | **Inspect Persistent Storage** | `kubectl get pv,pvc -A` |
+| **Inspect TLS Certificates** | `kubectl get certificates,clusterissuers -A` |
 | **Inspect Ingress Routes** | `kubectl get ingress -A` |
 
 ---
