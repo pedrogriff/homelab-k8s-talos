@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-storage-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storage-demo
+  template:
+    metadata:
+      labels:
+        app: storage-demo
+    spec:
+      containers:
+      - name: writer
+        image: busybox:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Starting storage demo..."
+            if [ -f /data/counter.txt ]; then
+              echo "Existing file found! Reading previous state:"
+              cat /data/counter.txt
+            else
+              echo "First time boot. Initializing file on persistent disk..."
+              echo "Storage initialized at: $(date)" > /data/counter.txt
+            fi
+            while true; do
+              echo "Tick at: $(date)" >> /data/counter.txt
+              sleep 5
+            done
+        volumeMounts:
+        - name: my-persistent-disk
+          mountPath: /data
+      volumes:
+      - name: my-persistent-disk
+        persistentVolumeClaim:
+          claimName: demo-storage-pvc

@@ -1,0 +1,28 @@
+# ==============================================================================
+# Talos Linux Control Plane Configuration (Template Example)
+# ==============================================================================
+# Generated using: talosctl gen config <cluster-name> https://<controlplane-ip>:6443
+# NOTE: Real credentials/certs are excluded for security.
+
+version: v1alpha1
+machine:
+  type: controlplane
+  install:
+    disk: /dev/sda
+    image: factory.talos.dev/installer/ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515:v1.13.8 # QEMU Guest Agent bundled
+    wipe: false
+  features:
+    diskQuotaSupport: true
+    kubePrism:
+      enabled: true
+      port: 7445
+    hostDNS:
+      enabled: true
+      forwardKubeDNSToHost: false
+cluster:
+  controlPlane:
+    endpoint: https://10.0.0.170:6443
+  network:
+    cni:
+      name: flannel
+  allowSchedulingOnControlPlanes: true # Enabled for single-node homelab operation

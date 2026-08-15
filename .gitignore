@@ -1,0 +1,26 @@
+# ==============================================================================
+# Security: NEVER commit unencrypted Kubernetes or Talos secrets to Git!
+# ==============================================================================
+
+# Client credentials and cluster configs containing private keys & CA certs
+talosconfig
+kubeconfig
+controlplane.yaml
+worker.yaml
+
+# Wildcards for certificates and keys
+*.key
+*.pem
+*.crt
+*.p12
+
+# Environment and local overrides
+.env
+.env.local
+*.local.yaml
+
+# Temporary and editor files
+.DS_Store
+.vscode/
+.idea/
+*.swp
