@@ -155,4 +155,4 @@ kubectl apply -f apps/monitoring/uptime-kuma.yaml
 ---
 
 ## 👤 Author & Homelab Engineer
-Built by **Pedro Griffin** as an Infrastructure-as-Code (IaC) and Cloud Platform portfolio project.
+Built by **Pedro Griff** as an Infrastructure-as-Code (IaC) and Cloud Platform portfolio project.
