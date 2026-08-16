@@ -3,11 +3,12 @@
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.2-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
+[![GitOps](https://img.shields.io/badge/GitOps-ArgoCD-orange?logo=argo&logoColor=white)](https://argo-cd.readthedocs.io/)
 [![Ingress](https://img.shields.io/badge/NGINX_Ingress-v1.12.0-009639?logo=nginx&logoColor=white)](https://kubernetes.github.io/ingress-nginx/)
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**.
+A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)** and managed via **GitOps (ArgoCD)**.
 
 ---
 
@@ -15,47 +16,59 @@ A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built fro
 
 ```mermaid
 flowchart TD
+    GitHub["GitHub Repository\n(pedrogriff/homelab-k8s-talos)\nSingle Source of Truth"]
+
     subgraph Host["Proxmox VE Hypervisor Host"]
         subgraph Admin["Management Workstation (Debian 13)"]
-            CLI["CLI Tools: talosctl, kubectl<br/>GitOps Manifest Repository"]
+            CLI["CLI Tools: talosctl, kubectl\nGit Client (SSH Key Auth)"]
         end
 
         subgraph TalosNode["Talos Linux Node (IP: 10.0.0.170)"]
             direction TB
             API["Talos gRPC API (:50000)"]
-            K8sCP["Kubernetes Control Plane (:6443)<br/>(etcd, kube-apiserver, kubelet)"]
+            K8sCP["Kubernetes Control Plane (:6443)\n(etcd, kube-apiserver, kubelet)"]
             
+            subgraph GitOps["GitOps Continuous Delivery Engine"]
+                Argo["ArgoCD Controller\n(Auto-Sync & Self-Healing)"]
+            end
+
             subgraph Security["Automated PKI & TLS Security"]
                 CM["cert-manager Controller (v1.17)"]
                 CA["Homelab Root CA (10-Year Root CA)"]
-                Issuer["ClusterIssuer (`homelab-ca-issuer`)"]
+                Issuer["ClusterIssuer (homelab-ca-issuer)"]
                 CM --> CA --> Issuer
             end
 
             subgraph Networking["Layer 7 Traffic Routing (HTTPS)"]
                 Ingress["NGINX Ingress Controller (:80 / :443)"]
-                TLSCert["Secret: `uptime-kuma-tls`<br/>(Auto-issued & Renewed)"]
+                TLSCert["Secret: uptime-kuma-tls\n(Auto-issued & Renewed)"]
                 Issuer -.->|"Signs TLS Cert"| TLSCert
                 TLSCert -.->|"Provides SSL"| Ingress
             end
             
             subgraph Storage["Persistent Storage Layer"]
-                LPP["CNCF Local Path Provisioner<br/>(/var/local-path-provisioner)"]
+                LPP["CNCF Local Path Provisioner\n(/var/local-path-provisioner)"]
             end
 
             subgraph Workloads["Deployed Microservices"]
-                Kuma["Uptime Kuma<br/>(monitoring namespace)"]
-                Demo["Podinfo Web App<br/>(default namespace)"]
+                Kuma["Uptime Kuma\n(monitoring namespace)"]
+                Demo["Podinfo Web App\n(default namespace)"]
             end
         end
     end
 
+    Admin -->|"git push"| GitHub
+    GitHub -->|"Continuous Sync Loop"| Argo
+    Argo -->|"Reconciles State"| Workloads
+
     Admin -->|"talosctl (:50000)"| API
     Admin -->|"kubectl (:6443)"| K8sCP
     
-    Browser["Web Browser / Client"] -->|"https://kuma.10.0.0.170.nip.io (HTTPS :443)"| Ingress
+    Browser["Web Browser / Client"] -->|"https://argocd.10.0.0.170.nip.io (HTTPS :443)"| Ingress
+    Browser -->|"https://kuma.10.0.0.170.nip.io (HTTPS :443)"| Ingress
     Browser -->|"https://hello.10.0.0.170.nip.io (HTTPS :443)"| Ingress
     
+    Ingress -->|"Routes to ArgoCD UI"| Argo
     Ingress -->|"Routes to :3001"| Kuma
     Ingress -->|"Routes to :80"| Demo
     
@@ -84,6 +97,10 @@ flowchart TD
 * Replaces error-prone manual SSL/TLS certificate creation and renewal with Kubernetes Custom Resource Definitions (CRDs).
 * Deploys a **2-Tier PKI**: A 10-year self-signed Root Certificate Authority generates an intermediate `ClusterIssuer` that signs and auto-renews 90-day application certificates on the fly.
 
+### 5. Why GitOps with ArgoCD?
+* **Git as Single Source of Truth:** Cluster desired state is version-controlled on GitHub. Manual `kubectl apply` commands on production are eliminated.
+* **Automated Reconciliation & Self-Healing:** ArgoCD continuously detects configuration drift and automatically restores modified or deleted cluster resources back to Git state.
+
 ---
 
 ## 📂 Repository Structure
@@ -98,12 +115,16 @@ flowchart TD
 │   ├── certificates/
 │   │   ├── cert-manager.yaml       # cert-manager deployment & CRDs (v1.17)
 │   │   └── cluster-issuer.yaml     # 2-Tier PKI Root CA & ClusterIssuer
+│   ├── gitops/
+│   │   ├── argocd.yaml             # ArgoCD Controller engine deployment
+│   │   ├── argocd-ingress.yaml     # ArgoCD Web UI Ingress with TLS
+│   │   └── homelab-apps.yaml       # Root GitOps Application CRD
 │   ├── storage/
 │   │   └── local-path-storage.yaml # Local Path Provisioner (StorageClass: local-path)
 │   └── ingress/
 │       ├── ingress-nginx.yaml      # NGINX Ingress Controller deployment
 │       └── ingress-routes.yaml     # Layer 7 Ingress routing rules with TLS
-└── apps/                           # Deployed Application Workloads
+└── apps/                           # Deployed Application Workloads (Managed via GitOps)
     ├── monitoring/
     │   └── uptime-kuma.yaml        # Uptime Kuma monitoring (StatefulSet/PVC)
     └── demo/
@@ -135,7 +156,7 @@ talosctl --talosconfig ./talosconfig bootstrap
 talosctl --talosconfig ./talosconfig kubeconfig .
 ```
 
-### 3. Deploying Core Infrastructure, PKI & Workloads
+### 3. Deploying Core Infrastructure, PKI & GitOps
 ```bash
 # Deploy persistent storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
@@ -148,9 +169,13 @@ kubectl apply -f infrastructure/certificates/cluster-issuer.yaml
 kubectl apply -f infrastructure/ingress/ingress-nginx.yaml
 kubectl apply -f infrastructure/ingress/ingress-routes.yaml
 
-# Deploy Applications
-kubectl apply -f apps/demo/hello-talos.yaml
-kubectl apply -f apps/monitoring/uptime-kuma.yaml
+# Deploy ArgoCD GitOps Engine
+kubectl create namespace argocd
+kubectl apply --server-side --force-conflicts -n argocd -f infrastructure/gitops/argocd.yaml
+kubectl apply -f infrastructure/gitops/argocd-ingress.yaml
+
+# Connect GitOps Root Application
+kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 ```
 
 ---
@@ -167,6 +192,7 @@ kubectl apply -f apps/monitoring/uptime-kuma.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **ArgoCD Applications Status** | `kubectl get applications -n argocd` |
 | **Talos Live Terminal Dashboard** | `talosctl --talosconfig talosconfig dashboard` |
 | **Node Kernel Logs (dmesg)** | `talosctl --talosconfig talosconfig dmesg` |
 | **Talos System Services** | `talosctl --talosconfig talosconfig service` |
