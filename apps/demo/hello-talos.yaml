@@ -5,7 +5,7 @@ metadata:
   labels:
     app: hello-talos
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: hello-talos
