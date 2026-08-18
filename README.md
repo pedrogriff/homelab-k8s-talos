@@ -3,12 +3,14 @@
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.2-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
+[![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
+[![Hubble](https://img.shields.io/badge/Observability-Hubble_UI-purple)](https://cilium.io/)
 [![GitOps](https://img.shields.io/badge/GitOps-ArgoCD-orange?logo=argo&logoColor=white)](https://argo-cd.readthedocs.io/)
 [![Ingress](https://img.shields.io/badge/NGINX_Ingress-v1.12.0-009639?logo=nginx&logoColor=white)](https://kubernetes.github.io/ingress-nginx/)
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)** and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, and managed via **GitOps (ArgoCD)**.
 
 ---
 
@@ -16,44 +18,39 @@ A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built fro
 
 ```mermaid
 flowchart TD
-    GitHub["GitHub Repository\n(pedrogriff/homelab-k8s-talos)\nSingle Source of Truth"]
+    GitHub["GitHub Repository (pedrogriff/homelab-k8s-talos) - Single Source of Truth"]
 
-    subgraph Host["Proxmox VE Hypervisor Host"]
-        subgraph Admin["Management Workstation (Debian 13)"]
-            CLI["CLI Tools: talosctl, kubectl\nGit Client (SSH Key Auth)"]
+    Admin["Management Workstation (Debian 13)\nCLI Tools: talosctl, kubectl, cilium, helm"]
+
+    subgraph TalosNode["Talos Linux Node (IP: 10.0.0.170)"]
+        API["Talos gRPC API (:50000)"]
+        K8sCP["Kubernetes Control Plane (:6443)"]
+        
+        subgraph eBPFEngine["Cilium eBPF & Observability"]
+            Cilium["Cilium Agent (In-Kernel eBPF Routing)"]
+            Hubble["Hubble Relay & Hubble UI Radar"]
+            CiliumPolicy["CiliumNetworkPolicy (Zero-Trust L7 Security)"]
         end
 
-        subgraph TalosNode["Talos Linux Node (IP: 10.0.0.170)"]
-            direction TB
-            API["Talos gRPC API (:50000)"]
-            K8sCP["Kubernetes Control Plane (:6443)\n(etcd, kube-apiserver, kubelet)"]
-            
-            subgraph GitOps["GitOps Continuous Delivery Engine"]
-                Argo["ArgoCD Controller\n(Auto-Sync & Self-Healing)"]
-            end
+        subgraph GitOps["GitOps Continuous Delivery Engine"]
+            Argo["ArgoCD Controller (Auto-Sync & Self-Healing)"]
+        end
 
-            subgraph Security["Automated PKI & TLS Security"]
-                CM["cert-manager Controller (v1.17)"]
-                CA["Homelab Root CA (10-Year Root CA)"]
-                Issuer["ClusterIssuer (homelab-ca-issuer)"]
-                CM --> CA --> Issuer
-            end
+        subgraph Security["Automated PKI & TLS Security"]
+            CM["cert-manager (2-Tier Root CA & ClusterIssuer)"]
+        end
 
-            subgraph Networking["Layer 7 Traffic Routing (HTTPS)"]
-                Ingress["NGINX Ingress Controller (:80 / :443)"]
-                TLSCert["Secret: uptime-kuma-tls\n(Auto-issued & Renewed)"]
-                Issuer -.->|"Signs TLS Cert"| TLSCert
-                TLSCert -.->|"Provides SSL"| Ingress
-            end
-            
-            subgraph Storage["Persistent Storage Layer"]
-                LPP["CNCF Local Path Provisioner\n(/var/local-path-provisioner)"]
-            end
+        subgraph Networking["Layer 7 Traffic Routing (HTTPS)"]
+            Ingress["NGINX Ingress Controller (:80 / :443)"]
+        end
+        
+        subgraph Storage["Persistent Storage Layer"]
+            LPP["CNCF Local Path Provisioner (/var/local-path-provisioner)"]
+        end
 
-            subgraph Workloads["Deployed Microservices"]
-                Kuma["Uptime Kuma\n(monitoring namespace)"]
-                Demo["Podinfo Web App\n(default namespace)"]
-            end
+        subgraph Workloads["Deployed Microservices"]
+            Kuma["Uptime Kuma (monitoring namespace)"]
+            Demo["Podinfo Web App (default namespace)"]
         end
     end
 
@@ -64,10 +61,12 @@ flowchart TD
     Admin -->|"talosctl (:50000)"| API
     Admin -->|"kubectl (:6443)"| K8sCP
     
-    Browser["Web Browser / Client"] -->|"https://argocd.10.0.0.170.nip.io (HTTPS :443)"| Ingress
-    Browser -->|"https://kuma.10.0.0.170.nip.io (HTTPS :443)"| Ingress
-    Browser -->|"https://hello.10.0.0.170.nip.io (HTTPS :443)"| Ingress
+    Browser["Web Browser / Client"] -->|"https://hubble.10.0.0.170.nip.io (Hubble UI)"| Ingress
+    Browser -->|"https://argocd.10.0.0.170.nip.io (ArgoCD UI)"| Ingress
+    Browser -->|"https://kuma.10.0.0.170.nip.io (Uptime Kuma)"| Ingress
+    Browser -->|"https://hello.10.0.0.170.nip.io (Podinfo)"| Ingress
     
+    Ingress -->|"Routes to Hubble UI"| Hubble
     Ingress -->|"Routes to ArgoCD UI"| Argo
     Ingress -->|"Routes to :3001"| Kuma
     Ingress -->|"Routes to :80"| Demo
@@ -101,6 +100,11 @@ flowchart TD
 * **Git as Single Source of Truth:** Cluster desired state is version-controlled on GitHub. Manual `kubectl apply` commands on production are eliminated.
 * **Automated Reconciliation & Self-Healing:** ArgoCD continuously detects configuration drift and automatically restores modified or deleted cluster resources back to Git state.
 
+### 6. Why eBPF Networking with Cilium & Hubble?
+* **Bypasses iptables Bottlenecks:** Uses in-kernel eBPF bytecode for hardware-speed socket routing directly inside the Talos Linux kernel.
+* **Deep Network Observability (Hubble UI):** Real-time visual mapping of all network packets, HTTP methods, latency graphs, and DNS queries without sidecar injection.
+* **Layer 7 Zero-Trust Security:** Enforces `CiliumNetworkPolicy` to restrict traffic between microservices at application layer granularity.
+
 ---
 
 ## 📂 Repository Structure
@@ -119,6 +123,10 @@ flowchart TD
 │   │   ├── argocd.yaml             # ArgoCD Controller engine deployment
 │   │   ├── argocd-ingress.yaml     # ArgoCD Web UI Ingress with TLS
 │   │   └── homelab-apps.yaml       # Root GitOps Application CRD
+│   ├── networking/
+│   │   ├── cilium-values.yaml      # Cilium eBPF & Hubble Helm values
+│   │   ├── hubble-ingress.yaml     # Hubble UI Ingress with TLS
+│   │   └── security-policy.yaml    # CiliumNetworkPolicy L7 Zero-Trust rules
 │   ├── storage/
 │   │   └── local-path-storage.yaml # Local Path Provisioner (StorageClass: local-path)
 │   └── ingress/
@@ -156,7 +164,7 @@ talosctl --talosconfig ./talosconfig bootstrap
 talosctl --talosconfig ./talosconfig kubeconfig .
 ```
 
-### 3. Deploying Core Infrastructure, PKI & GitOps
+### 3. Deploying Core Infrastructure, Networking & GitOps
 ```bash
 # Deploy persistent storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
@@ -169,12 +177,14 @@ kubectl apply -f infrastructure/certificates/cluster-issuer.yaml
 kubectl apply -f infrastructure/ingress/ingress-nginx.yaml
 kubectl apply -f infrastructure/ingress/ingress-routes.yaml
 
+# Deploy Cilium eBPF & Hubble UI
+helm upgrade --install cilium cilium/cilium --namespace kube-system -f infrastructure/networking/cilium-values.yaml
+kubectl apply -f infrastructure/networking/hubble-ingress.yaml
+
 # Deploy ArgoCD GitOps Engine
 kubectl create namespace argocd
 kubectl apply --server-side --force-conflicts -n argocd -f infrastructure/gitops/argocd.yaml
 kubectl apply -f infrastructure/gitops/argocd-ingress.yaml
-
-# Connect GitOps Root Application
 kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 ```
 
@@ -192,10 +202,10 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **Cilium Cluster Status** | `cilium status` |
+| **Hubble Real-time CLI Traffic Stream** | `cilium hubble port-forward & hubble observe` |
 | **ArgoCD Applications Status** | `kubectl get applications -n argocd` |
 | **Talos Live Terminal Dashboard** | `talosctl --talosconfig talosconfig dashboard` |
-| **Node Kernel Logs (dmesg)** | `talosctl --talosconfig talosconfig dmesg` |
-| **Talos System Services** | `talosctl --talosconfig talosconfig service` |
 | **Inspect Kubernetes Pods** | `kubectl get pods -A -o wide` |
 | **Inspect Persistent Storage** | `kubectl get pv,pvc -A` |
 | **Inspect TLS Certificates** | `kubectl get certificates,clusterissuers -A` |

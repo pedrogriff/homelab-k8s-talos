@@ -1,0 +1,26 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: secure-hello-talos
+  namespace: default
+spec:
+  endpointSelector:
+    matchLabels:
+      app: hello-talos
+  ingress:
+  # 1. Allow traffic from NGINX Ingress Controller (host network & ingress namespace)
+  - fromEntities:
+    - host
+    - remote-node
+    toPorts:
+    - ports:
+      - port: "9898"
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: ingress-nginx
+    toPorts:
+    - ports:
+      - port: "9898"
+        protocol: TCP
+  # All other internal pod traffic (like traffic-generator) will be DROPPED
