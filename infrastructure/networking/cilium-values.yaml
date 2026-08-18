@@ -1,0 +1,53 @@
+# ==============================================================================
+# Cilium eBPF Configuration for Talos Linux on Proxmox VE
+# ==============================================================================
+
+ipam:
+  mode: kubernetes
+
+k8sServiceHost: "10.0.0.170"
+k8sServicePort: 6443
+
+operator:
+  replicas: 1
+
+# Talos Linux cgroup2 and eBPF integration
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# Enable Hubble Network Observability & UI with auto-TLS
+hubble:
+  enabled: true
+  tls:
+    auto:
+      enabled: true
+      method: helm
+  relay:
+    enabled: true
+    tls:
+      server:
+        enabled: true
+  ui:
+    enabled: true
+    replicas: 1
