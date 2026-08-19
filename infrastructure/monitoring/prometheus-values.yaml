@@ -1,0 +1,79 @@
+# ==============================================================================
+# Prometheus & Grafana Configuration for Talos Linux on Proxmox VE
+# ==============================================================================
+
+# Disable control-plane scraping of static unauthenticated ports in Talos
+kubeControllerManager:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeProxy:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+
+# Enable node host metric collection (CPU, RAM, Disk I/O)
+nodeExporter:
+  enabled: true
+
+# Enable Kubernetes object state metrics (Pods, Deployments, PVCs)
+kubeStateMetrics:
+  enabled: true
+
+# Configure Grafana UI & Persistent Storage
+grafana:
+  enabled: true
+  adminPassword: "prom-operator"
+  persistence:
+    enabled: true
+    storageClassName: "local-path"
+    size: 2Gi
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+# Configure Prometheus Time-Series Database with Persistent Storage & Permission Fix
+prometheus:
+  enabled: true
+  prometheusSpec:
+    initContainers:
+    - name: fix-permissions
+      image: busybox:latest
+      command: ["sh", "-c", "chown -R 65534:65534 /prometheus && chmod -R 777 /prometheus"]
+      securityContext:
+        runAsUser: 0
+        runAsNonRoot: false
+      volumeMounts:
+      - name: prometheus-prometheus-kube-prometheus-prometheus-db
+        mountPath: /prometheus
+        subPath: prometheus-db
+    securityContext:
+      fsGroup: 65534
+      runAsUser: 65534
+      runAsNonRoot: true
+      runAsGroup: 65534
+    retention: 7d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "local-path"
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+# Configure Alertmanager
+alertmanager:
+  enabled: true

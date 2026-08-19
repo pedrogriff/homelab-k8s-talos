@@ -5,12 +5,14 @@
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
 [![Hubble](https://img.shields.io/badge/Observability-Hubble_UI-purple)](https://cilium.io/)
+[![Prometheus](https://img.shields.io/badge/Metrics-Prometheus-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
+[![Grafana](https://img.shields.io/badge/Dashboards-Grafana-F46800?logo=grafana&logoColor=white)](https://grafana.com/)
 [![GitOps](https://img.shields.io/badge/GitOps-ArgoCD-orange?logo=argo&logoColor=white)](https://argo-cd.readthedocs.io/)
 [![Ingress](https://img.shields.io/badge/NGINX_Ingress-v1.12.0-009639?logo=nginx&logoColor=white)](https://kubernetes.github.io/ingress-nginx/)
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, and managed via **GitOps (ArgoCD)**.
 
 ---
 
@@ -30,6 +32,16 @@ flowchart TD
             Cilium["Cilium Agent (In-Kernel eBPF Routing)"]
             Hubble["Hubble Relay & Hubble UI Radar"]
             CiliumPolicy["CiliumNetworkPolicy (Zero-Trust L7 Security)"]
+        end
+
+        subgraph MetricsObservability["Full-Stack Metrics & Dashboards"]
+            Prom["Prometheus Engine (5Gi Persistent DB)"]
+            Exporter["Node Exporter (Host Telemetry)"]
+            KSM["kube-state-metrics (Cluster State)"]
+            Graf["Grafana Suite (2Gi Persistent DB)"]
+            Exporter --> Prom
+            KSM --> Prom
+            Prom -->|"PromQL"| Graf
         end
 
         subgraph GitOps["GitOps Continuous Delivery Engine"]
@@ -61,17 +73,21 @@ flowchart TD
     Admin -->|"talosctl (:50000)"| API
     Admin -->|"kubectl (:6443)"| K8sCP
     
-    Browser["Web Browser / Client"] -->|"https://hubble.10.0.0.170.nip.io (Hubble UI)"| Ingress
+    Browser["Web Browser / Client"] -->|"https://grafana.10.0.0.170.nip.io (Grafana UI)"| Ingress
+    Browser -->|"https://hubble.10.0.0.170.nip.io (Hubble UI)"| Ingress
     Browser -->|"https://argocd.10.0.0.170.nip.io (ArgoCD UI)"| Ingress
     Browser -->|"https://kuma.10.0.0.170.nip.io (Uptime Kuma)"| Ingress
     Browser -->|"https://hello.10.0.0.170.nip.io (Podinfo)"| Ingress
     
+    Ingress -->|"Routes to Grafana UI"| Graf
     Ingress -->|"Routes to Hubble UI"| Hubble
     Ingress -->|"Routes to ArgoCD UI"| Argo
     Ingress -->|"Routes to :3001"| Kuma
     Ingress -->|"Routes to :80"| Demo
     
-    Kuma -->|"Mounts /app/data (2Gi PVC)"| LPP
+    Prom -->|"Mounts 5Gi PVC"| LPP
+    Graf -->|"Mounts 2Gi PVC"| LPP
+    Kuma -->|"Mounts 2Gi PVC"| LPP
 ```
 
 ---
@@ -86,7 +102,7 @@ flowchart TD
 ### 2. Why CNCF Local Path Provisioner for Storage?
 * Talos Linux enforces root immutability, meaning directories like `/opt` are read-only.
 * We provisioned the **CNCF Local Path Provisioner** configured specifically for Talos's persistent partition at `/var/local-path-provisioner`.
-* Enables dynamic `PersistentVolume` (PV) and `PersistentVolumeClaim` (PVC) creation for stateful databases (e.g. SQLite, PostgreSQL).
+* Enables dynamic `PersistentVolume` (PV) and `PersistentVolumeClaim` (PVC) creation for stateful databases (e.g. SQLite, PostgreSQL, Prometheus TSDB).
 
 ### 3. Why NGINX Ingress with HostNetwork?
 * Eliminates awkward 5-digit NodePort numbers (`:30080`, `:30001`).
@@ -104,6 +120,10 @@ flowchart TD
 * **Bypasses iptables Bottlenecks:** Uses in-kernel eBPF bytecode for hardware-speed socket routing directly inside the Talos Linux kernel.
 * **Deep Network Observability (Hubble UI):** Real-time visual mapping of all network packets, HTTP methods, latency graphs, and DNS queries without sidecar injection.
 * **Layer 7 Zero-Trust Security:** Enforces `CiliumNetworkPolicy` to restrict traffic between microservices at application layer granularity.
+
+### 7. Why Full-Stack Observability with Prometheus & Grafana?
+* **Real-time Telemetry & Capacity Planning:** Scrapes sub-second metrics from the Talos host kernel (CPU, RAM, Disk I/O), Kubernetes objects, and Cilium eBPF datapaths.
+* **Historical Persistence:** Allocates dedicated PersistentVolumes for Prometheus Time-Series Database (TSDB) and Grafana dashboard configurations.
 
 ---
 
@@ -123,6 +143,9 @@ flowchart TD
 │   │   ├── argocd.yaml             # ArgoCD Controller engine deployment
 │   │   ├── argocd-ingress.yaml     # ArgoCD Web UI Ingress with TLS
 │   │   └── homelab-apps.yaml       # Root GitOps Application CRD
+│   ├── monitoring/
+│   │   ├── prometheus-values.yaml  # kube-prometheus-stack Helm values (Talos optimized)
+│   │   └── grafana-ingress.yaml    # Grafana Dashboard HTTPS Ingress
 │   ├── networking/
 │   │   ├── cilium-values.yaml      # Cilium eBPF & Hubble Helm values
 │   │   ├── hubble-ingress.yaml     # Hubble UI Ingress with TLS
@@ -164,7 +187,7 @@ talosctl --talosconfig ./talosconfig bootstrap
 talosctl --talosconfig ./talosconfig kubeconfig .
 ```
 
-### 3. Deploying Core Infrastructure, Networking & GitOps
+### 3. Deploying Core Infrastructure, Networking, Metrics & GitOps
 ```bash
 # Deploy persistent storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
@@ -180,6 +203,10 @@ kubectl apply -f infrastructure/ingress/ingress-routes.yaml
 # Deploy Cilium eBPF & Hubble UI
 helm upgrade --install cilium cilium/cilium --namespace kube-system -f infrastructure/networking/cilium-values.yaml
 kubectl apply -f infrastructure/networking/hubble-ingress.yaml
+
+# Deploy Prometheus & Grafana Observability Stack
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring -f infrastructure/monitoring/prometheus-values.yaml
+kubectl apply -f infrastructure/monitoring/grafana-ingress.yaml
 
 # Deploy ArgoCD GitOps Engine
 kubectl create namespace argocd
@@ -202,6 +229,7 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **Inspect Monitoring Stack** | `kubectl get pods,pvc,ingress -n monitoring` |
 | **Cilium Cluster Status** | `cilium status` |
 | **Hubble Real-time CLI Traffic Stream** | `cilium hubble port-forward & hubble observe` |
 | **ArgoCD Applications Status** | `kubectl get applications -n argocd` |
