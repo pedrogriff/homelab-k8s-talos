@@ -3,6 +3,7 @@
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.2-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
+[![Topology](https://img.shields.io/badge/Topology-Multi--Node_Distributed_Cluster-blue)](https://kubernetes.io/)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
 [![Hubble](https://img.shields.io/badge/Observability-Hubble_UI-purple)](https://cilium.io/)
 [![Prometheus](https://img.shields.io/badge/Metrics-Prometheus-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
@@ -12,11 +13,11 @@
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, and managed via **GitOps (ArgoCD)**.
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ Distributed System Architecture
 
 ```mermaid
 flowchart TD
@@ -24,45 +25,24 @@ flowchart TD
 
     Admin["Management Workstation (Debian 13)\nCLI Tools: talosctl, kubectl, cilium, helm"]
 
-    subgraph TalosNode["Talos Linux Node (IP: 10.0.0.170)"]
-        API["Talos gRPC API (:50000)"]
-        K8sCP["Kubernetes Control Plane (:6443)"]
-        
-        subgraph eBPFEngine["Cilium eBPF & Observability"]
-            Cilium["Cilium Agent (In-Kernel eBPF Routing)"]
-            Hubble["Hubble Relay & Hubble UI Radar"]
-            CiliumPolicy["CiliumNetworkPolicy (Zero-Trust L7 Security)"]
-        end
-
-        subgraph MetricsObservability["Full-Stack Metrics & Dashboards"]
-            Prom["Prometheus Engine (5Gi Persistent DB)"]
-            Exporter["Node Exporter (Host Telemetry)"]
-            KSM["kube-state-metrics (Cluster State)"]
-            Graf["Grafana Suite (2Gi Persistent DB)"]
-            Exporter --> Prom
-            KSM --> Prom
-            Prom -->|"PromQL"| Graf
-        end
-
-        subgraph GitOps["GitOps Continuous Delivery Engine"]
-            Argo["ArgoCD Controller (Auto-Sync & Self-Healing)"]
-        end
-
-        subgraph Security["Automated PKI & TLS Security"]
-            CM["cert-manager (2-Tier Root CA & ClusterIssuer)"]
-        end
-
-        subgraph Networking["Layer 7 Traffic Routing (HTTPS)"]
+    subgraph ProxmoxHost["Proxmox VE Bare-Metal Hypervisor"]
+        subgraph CPNode["Control Plane Node (IP: 10.0.0.170)"]
+            API["Talos gRPC API (:50000)"]
+            K8sCP["Kubernetes Control Plane (:6443)\n(etcd, kube-apiserver, scheduler)"]
             Ingress["NGINX Ingress Controller (:80 / :443)"]
-        end
-        
-        subgraph Storage["Persistent Storage Layer"]
-            LPP["CNCF Local Path Provisioner (/var/local-path-provisioner)"]
+            Argo["ArgoCD GitOps Engine"]
+            CM["cert-manager PKI (Root CA & Issuer)"]
+            Prom["Prometheus Engine (5Gi TSDB)"]
+            Graf["Grafana Dashboards (2Gi DB)"]
+            CiliumCP["Cilium eBPF Agent & Hubble Relay"]
         end
 
-        subgraph Workloads["Deployed Microservices"]
-            Kuma["Uptime Kuma (monitoring namespace)"]
-            Demo["Podinfo Web App (default namespace)"]
+        subgraph WorkerNode["Dedicated Worker Node (IP: 10.0.0.190)"]
+            WorkerAPI["Talos gRPC API (:50000)"]
+            Kubelet["Worker kubelet Engine"]
+            CiliumWorker["Cilium eBPF Agent"]
+            ExporterWorker["Node Exporter"]
+            Workloads["Distributed Application Workloads\n(Podinfo Replicas, Microservices)"]
         end
     end
 
@@ -71,23 +51,20 @@ flowchart TD
     Argo -->|"Reconciles State"| Workloads
 
     Admin -->|"talosctl (:50000)"| API
+    Admin -->|"talosctl (:50000)"| WorkerAPI
     Admin -->|"kubectl (:6443)"| K8sCP
     
-    Browser["Web Browser / Client"] -->|"https://grafana.10.0.0.170.nip.io (Grafana UI)"| Ingress
-    Browser -->|"https://hubble.10.0.0.170.nip.io (Hubble UI)"| Ingress
-    Browser -->|"https://argocd.10.0.0.170.nip.io (ArgoCD UI)"| Ingress
-    Browser -->|"https://kuma.10.0.0.170.nip.io (Uptime Kuma)"| Ingress
-    Browser -->|"https://hello.10.0.0.170.nip.io (Podinfo)"| Ingress
+    Browser["Web Browser / Client"] -->|"https://grafana.10.0.0.170.nip.io"| Ingress
+    Browser -->|"https://hubble.10.0.0.170.nip.io"| Ingress
+    Browser -->|"https://argocd.10.0.0.170.nip.io"| Ingress
+    Browser -->|"https://kuma.10.0.0.170.nip.io"| Ingress
+    Browser -->|"https://hello.10.0.0.170.nip.io"| Ingress
     
-    Ingress -->|"Routes to Grafana UI"| Graf
-    Ingress -->|"Routes to Hubble UI"| Hubble
-    Ingress -->|"Routes to ArgoCD UI"| Argo
-    Ingress -->|"Routes to :3001"| Kuma
-    Ingress -->|"Routes to :80"| Demo
+    Ingress -->|"Routes Traffic"| Graf
+    Ingress -->|"Routes Traffic"| Argo
+    Ingress -->|"Routes Traffic"| Workloads
     
-    Prom -->|"Mounts 5Gi PVC"| LPP
-    Graf -->|"Mounts 2Gi PVC"| LPP
-    Kuma -->|"Mounts 2Gi PVC"| LPP
+    CiliumCP <-->|"eBPF Mesh Interconnect"| CiliumWorker
 ```
 
 ---
@@ -124,6 +101,10 @@ flowchart TD
 ### 7. Why Full-Stack Observability with Prometheus & Grafana?
 * **Real-time Telemetry & Capacity Planning:** Scrapes sub-second metrics from the Talos host kernel (CPU, RAM, Disk I/O), Kubernetes objects, and Cilium eBPF datapaths.
 * **Historical Persistence:** Allocates dedicated PersistentVolumes for Prometheus Time-Series Database (TSDB) and Grafana dashboard configurations.
+
+### 8. Why Multi-Node Horizontal Scaling (Control Plane vs. Worker Separation)?
+* **Isolation of Concerns:** Control-plane resources (`etcd`, API server, Scheduler) are isolated from noisy user workloads.
+* **High Availability & Anti-Affinity:** Microservice replicas are distributed across separate physical/virtual nodes, ensuring zero downtime if a worker node undergoes maintenance or failure.
 
 ---
 
@@ -164,27 +145,32 @@ flowchart TD
 
 ---
 
-## 🛠️ Step-by-Step Provisioning Guide
+## 🛠️ Step-by-Step Multi-Node Provisioning Guide
 
-### 1. Proxmox VM Hardware Specs
-* **CPU:** 2+ vCPUs (Type: `host`)
-* **RAM:** 4096 MB
-* **Disk:** VirtIO SCSI, Discard: Enabled, SSD Emulation: Enabled (20–40+ GB)
-* **OS:** Talos Linux ISO customized with `siderolabs/qemu-guest-agent` via [Talos Image Factory](https://factory.talos.dev).
-
-### 2. Generating Machine Configs & Bootstrapping
+### 1. Generating Machine Configs & Control Plane Bootstrap
 ```bash
-# 1. Generate declarative configurations
-talosctl gen config "proxmox-k8s" https://<NODE_IP>:6443 --install-disk /dev/sda
+# 1. Generate declarative configurations for cluster
+talosctl gen config "proxmox-k8s" https://10.0.0.170:6443 --install-disk /dev/sda
 
-# 2. Apply config to node in maintenance mode
-talosctl apply-config --insecure --nodes <NODE_IP> --file controlplane.yaml
+# 2. Apply config to Control Plane node in maintenance mode
+talosctl apply-config --insecure --nodes 10.0.0.170 --file controlplane.yaml
 
 # 3. Bootstrap etcd and initialize Kubernetes
 talosctl --talosconfig ./talosconfig bootstrap
 
 # 4. Fetch admin kubeconfig
 talosctl --talosconfig ./talosconfig kubeconfig .
+```
+
+### 2. Scaling Out Worker Nodes (Multi-Node Enrollment)
+```bash
+# 1. Boot new VM in Proxmox from Talos ISO and get its DHCP IP (e.g. 10.0.0.190)
+# 2. Apply worker configuration
+talosctl apply-config --insecure --nodes 10.0.0.190 --file worker.yaml
+
+# 3. Verify worker node enrollment
+kubectl get nodes -o wide
+kubectl label node <WORKER_NODE_NAME> node-role.kubernetes.io/worker=worker
 ```
 
 ### 3. Deploying Core Infrastructure, Networking, Metrics & GitOps
@@ -219,7 +205,7 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 ## 🔒 Security & Secrets Management Best Practice
 
-> **Golden Rule of DevOps:** Live cluster secrets, tokens, and private keys (`talosconfig`, `kubeconfig`, raw `controlplane.yaml`) are strictly excluded from Git via `.gitignore`.
+> **Golden Rule of DevOps:** Live cluster secrets, tokens, and private keys (`talosconfig`, `kubeconfig`, raw `controlplane.yaml`, `worker.yaml`) are strictly excluded from Git via `.gitignore`.
 > 
 > In enterprise environments, secrets are managed through **Sealed Secrets**, **External Secrets Operator** with HashiCorp Vault, or **SOPS** encryption before committing.
 
@@ -229,15 +215,14 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **Inspect All Cluster Nodes** | `kubectl get nodes -o wide` |
+| **Inspect Workload Distribution Across Nodes** | `kubectl get pods -A -o wide --sort-by='.spec.nodeName'` |
 | **Inspect Monitoring Stack** | `kubectl get pods,pvc,ingress -n monitoring` |
 | **Cilium Cluster Status** | `cilium status` |
 | **Hubble Real-time CLI Traffic Stream** | `cilium hubble port-forward & hubble observe` |
 | **ArgoCD Applications Status** | `kubectl get applications -n argocd` |
-| **Talos Live Terminal Dashboard** | `talosctl --talosconfig talosconfig dashboard` |
-| **Inspect Kubernetes Pods** | `kubectl get pods -A -o wide` |
-| **Inspect Persistent Storage** | `kubectl get pv,pvc -A` |
-| **Inspect TLS Certificates** | `kubectl get certificates,clusterissuers -A` |
-| **Inspect Ingress Routes** | `kubectl get ingress -A` |
+| **Talos Live Terminal Dashboard** | `talosctl --talosconfig talosconfig dashboard -n 10.0.0.170` |
+| **Talos Worker Live Dashboard** | `talosctl --talosconfig talosconfig dashboard -n 10.0.0.190` |
 
 ---
 
