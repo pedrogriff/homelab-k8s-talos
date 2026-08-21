@@ -4,6 +4,7 @@
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
 [![Topology](https://img.shields.io/badge/Topology-Multi--Node_Distributed_Cluster-blue)](https://kubernetes.io/)
+[![MCP](https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-8A2BE2)](https://modelcontextprotocol.io/)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
 [![Hubble](https://img.shields.io/badge/Observability-Hubble_UI-purple)](https://cilium.io/)
 [![Prometheus](https://img.shields.io/badge/Metrics-Prometheus-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
@@ -13,7 +14,7 @@
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, serving **Autonomous FastMCP Microservices**, and managed via **GitOps (ArgoCD)**.
 
 ---
 
@@ -23,7 +24,7 @@ A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructur
 flowchart TD
     GitHub["GitHub Repository (pedrogriff/homelab-k8s-talos) - Single Source of Truth"]
 
-    Admin["Management Workstation (Debian 13)\nCLI Tools: talosctl, kubectl, cilium, helm"]
+    Admin["Management Workstation (Debian 13)\nCLI Tools: talosctl, kubectl, cilium, helm, sops, age"]
 
     subgraph ProxmoxHost["Proxmox VE Bare-Metal Hypervisor"]
         subgraph CPNode["Control Plane Node (IP: 10.0.0.170)"]
@@ -42,6 +43,7 @@ flowchart TD
             Kubelet["Worker kubelet Engine"]
             CiliumWorker["Cilium eBPF Agent"]
             ExporterWorker["Node Exporter"]
+            MCPWorker["Compensation FastMCP Engine\n(Replica on Worker)"]
             Workloads["Distributed Application Workloads\n(Podinfo Replicas, Microservices)"]
         end
     end
@@ -49,17 +51,20 @@ flowchart TD
     Admin -->|"git push"| GitHub
     GitHub -->|"Continuous Sync Loop"| Argo
     Argo -->|"Reconciles State"| Workloads
+    Argo -->|"Reconciles State"| MCPWorker
 
     Admin -->|"talosctl (:50000)"| API
     Admin -->|"talosctl (:50000)"| WorkerAPI
     Admin -->|"kubectl (:6443)"| K8sCP
     
-    Browser["Web Browser / Client"] -->|"https://grafana.10.0.0.170.nip.io"| Ingress
+    Browser["AI Agent / Web Browser"] -->|"https://mcp.10.0.0.170.nip.io (FastMCP Engine)"| Ingress
+    Browser -->|"https://grafana.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://hubble.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://argocd.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://kuma.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://hello.10.0.0.170.nip.io"| Ingress
     
+    Ingress -->|"Routes Traffic"| MCPWorker
     Ingress -->|"Routes Traffic"| Graf
     Ingress -->|"Routes Traffic"| Argo
     Ingress -->|"Routes Traffic"| Workloads
@@ -106,12 +111,17 @@ flowchart TD
 * **Isolation of Concerns:** Control-plane resources (`etcd`, API server, Scheduler) are isolated from noisy user workloads.
 * **High Availability & Anti-Affinity:** Microservice replicas are distributed across separate physical/virtual nodes, ensuring zero downtime if a worker node undergoes maintenance or failure.
 
+### 9. Why Agentic Integration via Model Context Protocol (MCP)?
+* **Decoupled Architecture:** Separates LLM reasoning (Antigravity/Gemini) from deterministic execution (Largest Remainder Method calculations).
+* **Zero Math Hallucination:** Offloads financial rounding and pay band audits to dedicated, containerized Python microservices running securely in-cluster.
+
 ---
 
 ## 📂 Repository Structure
 
 ```text
 ├── .gitignore                      # Prevents committing credentials/private keys
+├── .sops.yaml                      # Asymmetric Age encryption configuration for GitOps
 ├── README.md                       # Infrastructure documentation & portfolio showcase
 ├── cluster-config/                 # Talos Machine Configurations
 │   ├── controlplane.example.yaml   # Template config for Control Plane nodes
@@ -137,6 +147,12 @@ flowchart TD
 │       ├── ingress-nginx.yaml      # NGINX Ingress Controller deployment
 │       └── ingress-routes.yaml     # Layer 7 Ingress routing rules with TLS
 └── apps/                           # Deployed Application Workloads (Managed via GitOps)
+    ├── compensation-mcp/           # Google Compensation FastMCP Microservice
+    │   ├── src/server.py           # FastMCP tools & FastAPI health endpoints
+    │   ├── Dockerfile              # Multi-stage non-root container specification
+    │   ├── requirements.txt        # Pinned microservice dependencies
+    │   └── k8s/
+    │       └── compensation-mcp.yaml # Deployment (Anti-Affinity), Service, Ingress
     ├── monitoring/
     │   └── uptime-kuma.yaml        # Uptime Kuma monitoring (StatefulSet/PVC)
     └── demo/
@@ -173,7 +189,7 @@ kubectl get nodes -o wide
 kubectl label node <WORKER_NODE_NAME> node-role.kubernetes.io/worker=worker
 ```
 
-### 3. Deploying Core Infrastructure, Networking, Metrics & GitOps
+### 3. Deploying Core Infrastructure, Networking, Metrics, MCP & GitOps
 ```bash
 # Deploy persistent storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
@@ -194,6 +210,9 @@ kubectl apply -f infrastructure/networking/hubble-ingress.yaml
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring -f infrastructure/monitoring/prometheus-values.yaml
 kubectl apply -f infrastructure/monitoring/grafana-ingress.yaml
 
+# Deploy Compensation FastMCP Microservice
+kubectl apply -f apps/compensation-mcp/k8s/compensation-mcp.yaml
+
 # Deploy ArgoCD GitOps Engine
 kubectl create namespace argocd
 kubectl apply --server-side --force-conflicts -n argocd -f infrastructure/gitops/argocd.yaml
@@ -207,7 +226,7 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 > **Golden Rule of DevOps:** Live cluster secrets, tokens, and private keys (`talosconfig`, `kubeconfig`, raw `controlplane.yaml`, `worker.yaml`) are strictly excluded from Git via `.gitignore`.
 > 
-> In enterprise environments, secrets are managed through **Sealed Secrets**, **External Secrets Operator** with HashiCorp Vault, or **SOPS** encryption before committing.
+> Production GitOps secrets are encrypted using **SOPS & Age asymmetric cryptography** with selective regex rules (`.sops.yaml`), ensuring only ciphertext is committed to GitHub while Kubernetes decrypts in-memory.
 
 ---
 
@@ -215,6 +234,8 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **Inspect FastMCP Microservice** | `kubectl get pods,svc,ingress -l app=compensation-mcp` |
+| **Test MCP Vesting Endpoint** | `curl -k -s -X POST https://mcp.10.0.0.170.nip.io/api/v1/vesting -H "Content-Type: application/json" -d '{"total_shares": 1500, "schedule_type": "FRONT_LOADED_33_33_22_12"}'` |
 | **Inspect All Cluster Nodes** | `kubectl get nodes -o wide` |
 | **Inspect Workload Distribution Across Nodes** | `kubectl get pods -A -o wide --sort-by='.spec.nodeName'` |
 | **Inspect Monitoring Stack** | `kubectl get pods,pvc,ingress -n monitoring` |

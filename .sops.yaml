@@ -1,0 +1,13 @@
+# ==============================================================================
+# SOPS Configuration for Homelab GitOps Cluster
+# ==============================================================================
+creation_rules:
+  # Encrypt all Kubernetes Secret files using our Age Public Key
+  - path_regex: .*\.secret\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age19696wc8zkpfedtl2e82wuenpr7e86pskryzlscd69mzn9492xcms44amzd
+
+  # Fallback for any yaml in secrets directory
+  - path_regex: .*/secrets/.*\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age19696wc8zkpfedtl2e82wuenpr7e86pskryzlscd69mzn9492xcms44amzd
