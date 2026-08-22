@@ -23,7 +23,7 @@ nodeExporter:
 kubeStateMetrics:
   enabled: true
 
-# Configure Grafana UI & Persistent Storage
+# Configure Grafana UI, Persistent Storage & OIDC Single Sign-On (Authentik)
 grafana:
   enabled: true
   adminPassword: "prom-operator"
@@ -31,6 +31,22 @@ grafana:
     enabled: true
     storageClassName: "local-path"
     size: 2Gi
+  # Injects all keys from grafana-sso-secret (GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET)
+  envFromSecret: "grafana-sso-secret"
+  grafana.ini:
+    server:
+      root_url: "https://grafana.10.0.0.170.nip.io"
+    auth.generic_oauth:
+      enabled: true
+      name: "Authentik SSO"
+      allow_sign_up: true
+      client_id: "grafana"
+      scopes: "openid profile email"
+      auth_url: "https://auth.10.0.0.170.nip.io/application/o/authorize/"
+      token_url: "https://auth.10.0.0.170.nip.io/application/o/token/"
+      api_url: "https://auth.10.0.0.170.nip.io/application/o/userinfo/"
+      role_attribute_path: "contains(groups[*], 'authentik Admins') && 'Admin' || 'Viewer'"
+      tls_skip_verify_insecure: true
   dashboardProviders:
     dashboardproviders.yaml:
       apiVersion: 1

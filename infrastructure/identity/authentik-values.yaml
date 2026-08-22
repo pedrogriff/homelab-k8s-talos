@@ -1,0 +1,66 @@
+# ==============================================================================
+# Authentik Identity Provider (IdP) Configuration for Talos Linux
+# ==============================================================================
+
+authentik:
+  # Secret key used for session signing and internal cryptography
+  secret_key: "authentik-super-secret-key-homelab-pedrogriff-2026-production-ready"
+  log_level: "info"
+  postgresql:
+    password: "AuthentikSecureDbPassword2026!"
+
+server:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1536Mi
+  # Ingress definition in Authentik 2026+ Helm Chart
+  ingress:
+    enabled: true
+    ingressClassName: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: homelab-ca-issuer
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    hosts:
+      - auth.10.0.0.170.nip.io
+      - auth.homelab.local
+    tls:
+      - secretName: authentik-tls
+        hosts:
+          - auth.10.0.0.170.nip.io
+          - auth.homelab.local
+
+worker:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1536Mi
+
+# PostgreSQL Relational Database for Users, Groups, and Tokens
+postgresql:
+  enabled: true
+  auth:
+    database: "authentik"
+    username: "authentik"
+    password: "AuthentikSecureDbPassword2026!"
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "local-path"
+      size: 5Gi
+
+# Redis Cache for High-Speed Session Management & Task Queues
+redis:
+  enabled: true
+  architecture: "standalone"
+  auth:
+    enabled: false
