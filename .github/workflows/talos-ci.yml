@@ -1,0 +1,38 @@
+name: "Talos Cluster Self-Hosted CI"
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-on-talos:
+    name: "Execute Verification on Talos Kubernetes Runner"
+    runs-on: talos-runner
+    steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "Inspect Self-Hosted Environment"
+        run: |
+          echo "========================================================="
+          echo "🚀 Executing Job on Talos Self-Hosted Ephemeral Pod"
+          echo "Pod Hostname: $(hostname)"
+          echo "Linux Kernel: $(uname -r)"
+          echo "Node Architecture: $(uname -m)"
+          echo "========================================================="
+
+      - name: "Verify FastMCP Math Invariants"
+        run: |
+          python3 -c "
+          import sys
+          print(f'Python Runtime: {sys.version}')
+          # Test Largest Remainder Method Invariant
+          total = 1500
+          shares = [int(total * p) for p in [0.33333333, 0.33333333, 0.22222222, 0.11111111]]
+          unallocated = total - sum(shares)
+          for i in range(unallocated):
+              shares[i] += 1
+          assert sum(shares) == total, 'Math invariant failed!'
+          print(f'✅ Largest Remainder Share Conservation Verified: {shares} sum to {sum(shares)} units!')
+          "

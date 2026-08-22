@@ -4,6 +4,7 @@
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
 [![Topology](https://img.shields.io/badge/Topology-Multi--Node_Distributed_Cluster-blue)](https://kubernetes.io/)
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-Actions_Runner_Controller_(ARC)-black?logo=githubactions&logoColor=white)](https://github.com/actions/actions-runner-controller)
 [![SSO](https://img.shields.io/badge/Identity-Authentik_OIDC_SSO-blue?logo=authentik&logoColor=white)](https://goauthentik.io/)
 [![MCP](https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-8A2BE2)](https://modelcontextprotocol.io/)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
@@ -15,7 +16,7 @@
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik Enterprise OIDC Single Sign-On**, serving **Autonomous FastMCP Microservices**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik Enterprise OIDC Single Sign-On**, serving **Autonomous FastMCP Microservices**, executing **Self-Hosted CI/CD via Actions Runner Controller (ARC)**, and managed via **GitOps (ArgoCD)**.
 
 ---
 
@@ -34,6 +35,7 @@ flowchart TD
             Ingress["NGINX Ingress Controller (:80 / :443)"]
             Argo["ArgoCD GitOps Engine"]
             CM["cert-manager PKI (Root CA & Issuer)"]
+            ARCOp["ARC Controller & Listener (arc-systems)"]
             AuthServer["Authentik IdP Server & Redis"]
             AuthDB["Authentik PostgreSQL (5Gi DB)"]
             Prom["Prometheus Engine (5Gi TSDB)"]
@@ -46,6 +48,7 @@ flowchart TD
             Kubelet["Worker kubelet Engine"]
             CiliumWorker["Cilium eBPF Agent"]
             ExporterWorker["Node Exporter"]
+            ARCRunner["Ephemeral CI/CD Runner Pods\n(Autoscales 0 to 5 on-demand)"]
             MCPWorker["Compensation FastMCP Engine\n(Replica on Worker)"]
             Workloads["Distributed Application Workloads\n(Podinfo Replicas, Microservices)"]
         end
@@ -53,6 +56,8 @@ flowchart TD
 
     Admin -->|"git push"| GitHub
     GitHub -->|"Continuous Sync Loop"| Argo
+    GitHub -->|"Webhook / Job Dispatch"| ARCOp
+    ARCOp -->|"Spins up on-demand"| ARCRunner
     Argo -->|"Reconciles State"| Workloads
     Argo -->|"Reconciles State"| MCPWorker
 
@@ -126,11 +131,19 @@ flowchart TD
 * **Eliminates Identity Fragmentation:** Centralizes user accounts, MFA, and access revocation in a unified IdP.
 * **Cryptographic Token Verification:** Issues signed RS256 JSON Web Tokens (JWT) containing group claims (`authentik Admins`), allowing downstream apps (Grafana, ArgoCD) to enforce granular RBAC automatically.
 
+### 11. Why Self-Hosted Autoscaling CI/CD Runners (Actions Runner Controller - ARC)?
+* **Zero-Trust Ephemeral Isolation:** Runners spawn as temporary pods for a single job and are destroyed immediately upon completion, eliminating supply chain persistence attacks.
+* **Private Network Access & High Throughput:** Enables GitHub Actions to run heavy mathematical simulations and integration tests directly against in-cluster databases and private APIs.
+* **Cost Efficiency:** Scales to 0 pods when idle, bursting up to 5 parallel runners on demand.
+
 ---
 
 ## 📂 Repository Structure
 
 ```text
+├── .github/
+│   └── workflows/
+│       └── talos-ci.yml            # Self-hosted CI workflow executing on talos-runner
 ├── .gitignore                      # Prevents committing credentials/private keys
 ├── .sops.yaml                      # Asymmetric Age encryption configuration for GitOps
 ├── README.md                       # Infrastructure documentation & portfolio showcase
@@ -141,6 +154,9 @@ flowchart TD
 │   ├── certificates/
 │   │   ├── cert-manager.yaml       # cert-manager deployment & CRDs (v1.17)
 │   │   └── cluster-issuer.yaml     # 2-Tier PKI Root CA & ClusterIssuer
+│   ├── cicd/
+│   │   ├── runner-scale-set-values.yaml # ARC Runner Scale Set (runs-on: talos-runner)
+│   │   └── arc-github-token.secret.yaml # SOPS-encrypted GitHub PAT
 │   ├── identity/
 │   │   └── authentik-values.yaml   # Authentik IdP (Postgres 5Gi, Redis, Ingress TLS)
 │   ├── gitops/
@@ -149,7 +165,8 @@ flowchart TD
 │   │   └── homelab-apps.yaml       # Root GitOps Application CRD
 │   ├── monitoring/
 │   │   ├── prometheus-values.yaml  # kube-prometheus-stack + Grafana OIDC Generic OAuth
-│   │   └── grafana-ingress.yaml    # Grafana Dashboard HTTPS Ingress
+│   │   ├── grafana-ingress.yaml    # Grafana Dashboard HTTPS Ingress
+│   │   └── grafana-sso.secret.yaml # SOPS-encrypted Grafana OAuth client secret
 │   ├── networking/
 │   │   ├── cilium-values.yaml      # Cilium eBPF & Hubble Helm values
 │   │   ├── hubble-ingress.yaml     # Hubble UI Ingress with TLS
@@ -202,7 +219,7 @@ kubectl get nodes -o wide
 kubectl label node <WORKER_NODE_NAME> node-role.kubernetes.io/worker=worker
 ```
 
-### 3. Deploying Core Infrastructure, Identity, Monitoring, MCP & GitOps
+### 3. Deploying Core Infrastructure, Identity, CI/CD, Monitoring & GitOps
 ```bash
 # Deploy persistent storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
@@ -225,6 +242,10 @@ helm upgrade --install authentik authentik/authentik --namespace identity -f inf
 # Deploy Prometheus & Grafana Observability Stack (with OIDC Single Sign-On)
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring -f infrastructure/monitoring/prometheus-values.yaml
 kubectl apply -f infrastructure/monitoring/grafana-ingress.yaml
+
+# Deploy Actions Runner Controller (ARC) & Self-Hosted Runner Scale Set
+helm upgrade --install arc --namespace arc-systems oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+helm upgrade --install talos-runner --namespace arc-runners -f infrastructure/cicd/runner-scale-set-values.yaml oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
 
 # Deploy Compensation FastMCP Microservice
 kubectl apply -f apps/compensation-mcp/k8s/compensation-mcp.yaml
@@ -250,6 +271,7 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **Inspect Self-Hosted CI/CD Runners** | `kubectl get pods -n arc-systems && kubectl get pods -n arc-runners` |
 | **Inspect Authentik Identity Provider** | `kubectl get pods,pvc,ingress -n identity` |
 | **Inspect FastMCP Microservice** | `kubectl get pods,svc,ingress -l app=compensation-mcp` |
 | **Test MCP Vesting Endpoint** | `curl -k -s -X POST https://mcp.10.0.0.170.nip.io/api/v1/vesting -H "Content-Type: application/json" -d '{"total_shares": 1500, "schedule_type": "FRONT_LOADED_33_33_22_12"}'` |

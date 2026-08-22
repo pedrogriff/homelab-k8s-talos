@@ -1,0 +1,42 @@
+# ==============================================================================
+# GitHub Actions Autoscaling Runner Scale Set Configuration
+# ==============================================================================
+
+# The target GitHub repository to execute workflows for
+githubConfigUrl: "https://github.com/pedrogriff/homelab-k8s-talos"
+
+# Name of the Kubernetes secret in arc-runners containing github_token
+githubConfigSecret: "arc-github-token"
+
+# Autoscaling parameters (Scale to 0 when idle)
+minRunners: 0
+maxRunners: 5
+
+# Runner Scale Set Name (used in workflow files as: runs-on: talos-runner)
+runnerScaleSetName: "talos-runner"
+
+# Pod template for the ephemeral runner
+template:
+  spec:
+    # Prefer running CI/CD jobs on dedicated worker node (talos-uc5-31k)
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: node-role.kubernetes.io/worker
+              operator: In
+              values:
+              - worker
+    containers:
+    - name: runner
+      image: "ghcr.io/actions/actions-runner:latest"
+      command: ["/home/runner/run.sh"]
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 2000m
+          memory: 2048Mi
