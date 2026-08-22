@@ -4,6 +4,7 @@
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
 [![Topology](https://img.shields.io/badge/Topology-Multi--Node_Distributed_Cluster-blue)](https://kubernetes.io/)
+[![SSO](https://img.shields.io/badge/Identity-Authentik_OIDC_SSO-blue?logo=authentik&logoColor=white)](https://goauthentik.io/)
 [![MCP](https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-8A2BE2)](https://modelcontextprotocol.io/)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
 [![Hubble](https://img.shields.io/badge/Observability-Hubble_UI-purple)](https://cilium.io/)
@@ -14,7 +15,7 @@
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, serving **Autonomous FastMCP Microservices**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik Enterprise OIDC Single Sign-On**, serving **Autonomous FastMCP Microservices**, and managed via **GitOps (ArgoCD)**.
 
 ---
 
@@ -33,6 +34,8 @@ flowchart TD
             Ingress["NGINX Ingress Controller (:80 / :443)"]
             Argo["ArgoCD GitOps Engine"]
             CM["cert-manager PKI (Root CA & Issuer)"]
+            AuthServer["Authentik IdP Server & Redis"]
+            AuthDB["Authentik PostgreSQL (5Gi DB)"]
             Prom["Prometheus Engine (5Gi TSDB)"]
             Graf["Grafana Dashboards (2Gi DB)"]
             CiliumCP["Cilium eBPF Agent & Hubble Relay"]
@@ -57,18 +60,22 @@ flowchart TD
     Admin -->|"talosctl (:50000)"| WorkerAPI
     Admin -->|"kubectl (:6443)"| K8sCP
     
-    Browser["AI Agent / Web Browser"] -->|"https://mcp.10.0.0.170.nip.io (FastMCP Engine)"| Ingress
-    Browser -->|"https://grafana.10.0.0.170.nip.io"| Ingress
+    Browser["AI Agent / Web Browser"] -->|"https://auth.10.0.0.170.nip.io (OIDC IdP)"| Ingress
+    Browser -->|"https://grafana.10.0.0.170.nip.io (Authentik SSO)"| Ingress
+    Browser -->|"https://mcp.10.0.0.170.nip.io (FastMCP Engine)"| Ingress
     Browser -->|"https://hubble.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://argocd.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://kuma.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://hello.10.0.0.170.nip.io"| Ingress
     
+    Ingress -->|"Routes Traffic"| AuthServer
     Ingress -->|"Routes Traffic"| MCPWorker
     Ingress -->|"Routes Traffic"| Graf
     Ingress -->|"Routes Traffic"| Argo
     Ingress -->|"Routes Traffic"| Workloads
     
+    AuthServer -->|"Validates Sessions"| AuthDB
+    Graf -->|"OIDC Token Validation"| AuthServer
     CiliumCP <-->|"eBPF Mesh Interconnect"| CiliumWorker
 ```
 
@@ -115,6 +122,10 @@ flowchart TD
 * **Decoupled Architecture:** Separates LLM reasoning (Antigravity/Gemini) from deterministic execution (Largest Remainder Method calculations).
 * **Zero Math Hallucination:** Offloads financial rounding and pay band audits to dedicated, containerized Python microservices running securely in-cluster.
 
+### 10. Why Centralized Identity & Role-Based Access Control (Authentik OIDC SSO)?
+* **Eliminates Identity Fragmentation:** Centralizes user accounts, MFA, and access revocation in a unified IdP.
+* **Cryptographic Token Verification:** Issues signed RS256 JSON Web Tokens (JWT) containing group claims (`authentik Admins`), allowing downstream apps (Grafana, ArgoCD) to enforce granular RBAC automatically.
+
 ---
 
 ## 📂 Repository Structure
@@ -130,12 +141,14 @@ flowchart TD
 │   ├── certificates/
 │   │   ├── cert-manager.yaml       # cert-manager deployment & CRDs (v1.17)
 │   │   └── cluster-issuer.yaml     # 2-Tier PKI Root CA & ClusterIssuer
+│   ├── identity/
+│   │   └── authentik-values.yaml   # Authentik IdP (Postgres 5Gi, Redis, Ingress TLS)
 │   ├── gitops/
 │   │   ├── argocd.yaml             # ArgoCD Controller engine deployment
 │   │   ├── argocd-ingress.yaml     # ArgoCD Web UI Ingress with TLS
 │   │   └── homelab-apps.yaml       # Root GitOps Application CRD
 │   ├── monitoring/
-│   │   ├── prometheus-values.yaml  # kube-prometheus-stack Helm values (Talos optimized)
+│   │   ├── prometheus-values.yaml  # kube-prometheus-stack + Grafana OIDC Generic OAuth
 │   │   └── grafana-ingress.yaml    # Grafana Dashboard HTTPS Ingress
 │   ├── networking/
 │   │   ├── cilium-values.yaml      # Cilium eBPF & Hubble Helm values
@@ -189,7 +202,7 @@ kubectl get nodes -o wide
 kubectl label node <WORKER_NODE_NAME> node-role.kubernetes.io/worker=worker
 ```
 
-### 3. Deploying Core Infrastructure, Networking, Metrics, MCP & GitOps
+### 3. Deploying Core Infrastructure, Identity, Monitoring, MCP & GitOps
 ```bash
 # Deploy persistent storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
@@ -206,7 +219,10 @@ kubectl apply -f infrastructure/ingress/ingress-routes.yaml
 helm upgrade --install cilium cilium/cilium --namespace kube-system -f infrastructure/networking/cilium-values.yaml
 kubectl apply -f infrastructure/networking/hubble-ingress.yaml
 
-# Deploy Prometheus & Grafana Observability Stack
+# Deploy Authentik Enterprise Identity Provider
+helm upgrade --install authentik authentik/authentik --namespace identity -f infrastructure/identity/authentik-values.yaml
+
+# Deploy Prometheus & Grafana Observability Stack (with OIDC Single Sign-On)
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring -f infrastructure/monitoring/prometheus-values.yaml
 kubectl apply -f infrastructure/monitoring/grafana-ingress.yaml
 
@@ -234,6 +250,7 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **Inspect Authentik Identity Provider** | `kubectl get pods,pvc,ingress -n identity` |
 | **Inspect FastMCP Microservice** | `kubectl get pods,svc,ingress -l app=compensation-mcp` |
 | **Test MCP Vesting Endpoint** | `curl -k -s -X POST https://mcp.10.0.0.170.nip.io/api/v1/vesting -H "Content-Type: application/json" -d '{"total_shares": 1500, "schedule_type": "FRONT_LOADED_33_33_22_12"}'` |
 | **Inspect All Cluster Nodes** | `kubectl get nodes -o wide` |
