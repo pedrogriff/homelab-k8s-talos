@@ -1,0 +1,17 @@
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-cluster-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *" # Run daily at 02:00 UTC
+  template:
+    includedNamespaces:
+    - identity
+    - monitoring
+    - default
+    - storage
+    - arc-systems
+    - arc-runners
+    defaultVolumesToFsBackup: true
+    ttl: 720h0m0s # 30-day automatic retention policy

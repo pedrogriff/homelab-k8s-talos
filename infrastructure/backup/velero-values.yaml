@@ -1,0 +1,35 @@
+# ==============================================================================
+# Velero Disaster Recovery Configuration for S3 (MinIO) on Talos Linux
+# ==============================================================================
+
+initContainers:
+  - name: velero-plugin-for-aws
+    image: velero/velero-plugin-for-aws:v1.11.1
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
+
+configuration:
+  backupStorageLocation:
+    - name: default
+      provider: aws
+      bucket: talos-backups
+      config:
+        region: minio
+        s3ForcePathStyle: "true"
+        s3Url: http://minio.storage.svc.cluster.local:9000
+        insecureSkipTLSVerify: "true"
+  volumeSnapshotLocation:
+    - name: default
+      provider: aws
+      config:
+        region: minio
+
+# Enable node-agent (Kopia / Restic) for volume backups of local-path PVs
+deployNodeAgent: true
+
+# Use SOPS-encrypted Kubernetes Secret for AWS / S3 Credentials
+credentials:
+  useSecret: true
+  existingSecret: "velero-s3-credentials"
