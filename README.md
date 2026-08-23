@@ -4,6 +4,7 @@
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
 [![Proxmox](https://img.shields.io/badge/Proxmox_VE-Virtualization-E57000?logo=proxmox&logoColor=white)](https://www.proxmox.com/)
 [![Topology](https://img.shields.io/badge/Topology-Multi--Node_Distributed_Cluster-blue)](https://kubernetes.io/)
+[![Disaster Recovery](https://img.shields.io/badge/Disaster_Recovery-Velero_%26_MinIO_S3-0052CC?logo=minio&logoColor=white)](https://velero.io/)
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-Actions_Runner_Controller_(ARC)-black?logo=githubactions&logoColor=white)](https://github.com/actions/actions-runner-controller)
 [![SSO](https://img.shields.io/badge/Identity-Authentik_OIDC_SSO-blue?logo=authentik&logoColor=white)](https://goauthentik.io/)
 [![MCP](https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-8A2BE2)](https://modelcontextprotocol.io/)
@@ -16,7 +17,7 @@
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik Enterprise OIDC Single Sign-On**, serving **Autonomous FastMCP Microservices**, executing **Self-Hosted CI/CD via Actions Runner Controller (ARC)**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik Enterprise OIDC Single Sign-On**, protected by **Velero & MinIO S3 Cloud-Native Disaster Recovery**, serving **Autonomous FastMCP Microservices**, executing **Self-Hosted CI/CD via Actions Runner Controller (ARC)**, and managed via **GitOps (ArgoCD)**.
 
 ---
 
@@ -26,7 +27,7 @@ A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructur
 flowchart TD
     GitHub["GitHub Repository (pedrogriff/homelab-k8s-talos) - Single Source of Truth"]
 
-    Admin["Management Workstation (Debian 13)\nCLI Tools: talosctl, kubectl, cilium, helm, sops, age"]
+    Admin["Management Workstation (Debian 13)\nCLI Tools: talosctl, kubectl, cilium, helm, sops, age, velero"]
 
     subgraph ProxmoxHost["Proxmox VE Bare-Metal Hypervisor"]
         subgraph CPNode["Control Plane Node (IP: 10.0.0.170)"]
@@ -35,6 +36,8 @@ flowchart TD
             Ingress["NGINX Ingress Controller (:80 / :443)"]
             Argo["ArgoCD GitOps Engine"]
             CM["cert-manager PKI (Root CA & Issuer)"]
+            VeleroOp["Velero DR Operator (velero namespace)"]
+            MinIOS3["MinIO S3 Storage (10Gi PVC)"]
             ARCOp["ARC Controller & Listener (arc-systems)"]
             AuthServer["Authentik IdP Server & Redis"]
             AuthDB["Authentik PostgreSQL (5Gi DB)"]
@@ -47,6 +50,7 @@ flowchart TD
             WorkerAPI["Talos gRPC API (:50000)"]
             Kubelet["Worker kubelet Engine"]
             CiliumWorker["Cilium eBPF Agent"]
+            NodeAgent["Velero Kopia Node-Agent"]
             ExporterWorker["Node Exporter"]
             ARCRunner["Ephemeral CI/CD Runner Pods\n(Autoscales 0 to 5 on-demand)"]
             MCPWorker["Compensation FastMCP Engine\n(Replica on Worker)"]
@@ -64,8 +68,13 @@ flowchart TD
     Admin -->|"talosctl (:50000)"| API
     Admin -->|"talosctl (:50000)"| WorkerAPI
     Admin -->|"kubectl (:6443)"| K8sCP
+    Admin -->|"velero backup / restore"| VeleroOp
     
-    Browser["AI Agent / Web Browser"] -->|"https://auth.10.0.0.170.nip.io (OIDC IdP)"| Ingress
+    VeleroOp -->|"Streams PV Snapshots & K8s State"| MinIOS3
+    NodeAgent -->|"Volume File System Snapshots"| MinIOS3
+    
+    Browser["AI Agent / Web Browser"] -->|"https://minio.10.0.0.170.nip.io (S3 Console)"| Ingress
+    Browser -->|"https://auth.10.0.0.170.nip.io (OIDC IdP)"| Ingress
     Browser -->|"https://grafana.10.0.0.170.nip.io (Authentik SSO)"| Ingress
     Browser -->|"https://mcp.10.0.0.170.nip.io (FastMCP Engine)"| Ingress
     Browser -->|"https://hubble.10.0.0.170.nip.io"| Ingress
@@ -73,6 +82,7 @@ flowchart TD
     Browser -->|"https://kuma.10.0.0.170.nip.io"| Ingress
     Browser -->|"https://hello.10.0.0.170.nip.io"| Ingress
     
+    Ingress -->|"Routes Traffic"| MinIOS3
     Ingress -->|"Routes Traffic"| AuthServer
     Ingress -->|"Routes Traffic"| MCPWorker
     Ingress -->|"Routes Traffic"| Graf
@@ -136,6 +146,11 @@ flowchart TD
 * **Private Network Access & High Throughput:** Enables GitHub Actions to run heavy mathematical simulations and integration tests directly against in-cluster databases and private APIs.
 * **Cost Efficiency:** Scales to 0 pods when idle, bursting up to 5 parallel runners on demand.
 
+### 12. Why Cloud-Native Disaster Recovery with Velero & MinIO S3?
+* **Strict RPO / RTO Guarantees:** Enforces 30-day automated daily snapshots of all cluster PersistentVolumes and serialized Kubernetes CRDs to S3 object storage.
+* **Non-Corrupt Volume Snapshots:** Uses Kopia / Restic node-agents to freeze I/O and capture atomic disk backups across active PostgreSQL and Prometheus TSDB databases.
+* **Instant Recovery:** Enables complete cluster reconstruction with a single `velero restore create` command.
+
 ---
 
 ## 📂 Repository Structure
@@ -151,6 +166,10 @@ flowchart TD
 │   ├── controlplane.example.yaml   # Template config for Control Plane nodes
 │   └── worker.example.yaml         # Template config for scaling Worker nodes
 ├── infrastructure/                 # Core Cluster Infrastructure
+│   ├── backup/
+│   │   ├── velero-values.yaml      # Velero Disaster Recovery Helm configuration
+│   │   ├── velero-credentials.secret.yaml # SOPS-encrypted S3 access keys
+│   │   └── daily-schedule.yaml     # Automated daily backup schedule CRD
 │   ├── certificates/
 │   │   ├── cert-manager.yaml       # cert-manager deployment & CRDs (v1.17)
 │   │   └── cluster-issuer.yaml     # 2-Tier PKI Root CA & ClusterIssuer
@@ -172,7 +191,8 @@ flowchart TD
 │   │   ├── hubble-ingress.yaml     # Hubble UI Ingress with TLS
 │   │   └── security-policy.yaml    # CiliumNetworkPolicy L7 Zero-Trust rules
 │   ├── storage/
-│   │   └── local-path-storage.yaml # Local Path Provisioner (StorageClass: local-path)
+│   │   ├── local-path-storage.yaml # Local Path Provisioner (StorageClass: local-path)
+│   │   └── minio.yaml              # MinIO S3 Object Storage (10Gi PVC, TLS Ingress)
 │   └── ingress/
 │       ├── ingress-nginx.yaml      # NGINX Ingress Controller deployment
 │       └── ingress-routes.yaml     # Layer 7 Ingress routing rules with TLS
@@ -219,10 +239,11 @@ kubectl get nodes -o wide
 kubectl label node <WORKER_NODE_NAME> node-role.kubernetes.io/worker=worker
 ```
 
-### 3. Deploying Core Infrastructure, Identity, CI/CD, Monitoring & GitOps
+### 3. Deploying Core Infrastructure, Storage, Identity, CI/CD, DR & GitOps
 ```bash
-# Deploy persistent storage
+# Deploy persistent storage & MinIO S3 Object Storage
 kubectl apply -f infrastructure/storage/local-path-storage.yaml
+kubectl apply -f infrastructure/storage/minio.yaml
 
 # Deploy cert-manager & PKI ClusterIssuers
 kubectl apply -f infrastructure/certificates/cert-manager.yaml
@@ -246,6 +267,10 @@ kubectl apply -f infrastructure/monitoring/grafana-ingress.yaml
 # Deploy Actions Runner Controller (ARC) & Self-Hosted Runner Scale Set
 helm upgrade --install arc --namespace arc-systems oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
 helm upgrade --install talos-runner --namespace arc-runners -f infrastructure/cicd/runner-scale-set-values.yaml oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+
+# Deploy Velero Disaster Recovery Operator
+helm upgrade --install velero vmware-tanzu/velero --namespace velero -f infrastructure/backup/velero-values.yaml
+kubectl apply -f infrastructure/backup/daily-schedule.yaml
 
 # Deploy Compensation FastMCP Microservice
 kubectl apply -f apps/compensation-mcp/k8s/compensation-mcp.yaml
@@ -271,8 +296,13 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 | Task | Command |
 | :--- | :--- |
+| **List Velero S3 Backups** | `velero backup get` |
+| **Trigger On-Demand Full Cluster Backup** | `velero backup create cluster-manual-backup --default-volumes-to-fs-backup` |
+| **Inspect Backup Details & Volume Snapshots** | `velero backup describe <BACKUP_NAME> --details` |
+| **Restore Namespace from S3 Backup** | `velero restore create --from-backup <BACKUP_NAME> --include-namespaces <NAME>` |
 | **Inspect Self-Hosted CI/CD Runners** | `kubectl get pods -n arc-systems && kubectl get pods -n arc-runners` |
 | **Inspect Authentik Identity Provider** | `kubectl get pods,pvc,ingress -n identity` |
+| **Inspect MinIO S3 Object Storage** | `kubectl get pods,pvc,ingress -n storage` |
 | **Inspect FastMCP Microservice** | `kubectl get pods,svc,ingress -l app=compensation-mcp` |
 | **Test MCP Vesting Endpoint** | `curl -k -s -X POST https://mcp.10.0.0.170.nip.io/api/v1/vesting -H "Content-Type: application/json" -d '{"total_shares": 1500, "schedule_type": "FRONT_LOADED_33_33_22_12"}'` |
 | **Inspect All Cluster Nodes** | `kubectl get nodes -o wide` |
