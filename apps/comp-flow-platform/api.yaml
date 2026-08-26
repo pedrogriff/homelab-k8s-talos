@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: compflow-api-secret
+  namespace: default
+type: Opaque
+stringData:
+  SECRET_KEY: compflow-enterprise-production-jwt-secret-2026-secure
+  MASTER_API_KEY: compflow-master-service-key-2026
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: compflow-api-config
+  namespace: default
+data:
+  APP_NAME: "CompFlow Platform"
+  ENVIRONMENT: "production"
+  DATABASE_URL: "postgresql+asyncpg://postgres:compflow-prod-db-password-2026@compflow-postgres.default.svc.cluster.local:5432/compflow"
+  REDIS_URL: "redis://compflow-redis.default.svc.cluster.local:6379/0"
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  DEBUG: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compflow-api
+  namespace: default
+  labels:
+    app: compflow-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: compflow-api
+  template:
+    metadata:
+      labels:
+        app: compflow-api
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - compflow-api
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z -v -w3 compflow-postgres.default.svc.cluster.local 5432; do echo "Waiting for postgres..."; sleep 2; done']
+      containers:
+      - name: api
+        image: ghcr.io/pedrogriff/comp-flow-platform:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: compflow-api-config
+        - secretRef:
+            name: compflow-api-secret
+        ports:
+        - containerPort: 8000
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          limits:
+            memory: 512Mi
+            cpu: 500m
+          requests:
+            memory: 256Mi
+            cpu: 100m
