@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: compflow-redis
+  namespace: default
+  labels:
+    app: compflow-redis
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  selector:
+    app: compflow-redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compflow-redis
+  namespace: default
+  labels:
+    app: compflow-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compflow-redis
+  template:
+    metadata:
+      labels:
+        app: compflow-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --maxmemory
+        - 256mb
+        - --maxmemory-policy
+        - allkeys-lru
+        ports:
+        - containerPort: 6379
+          name: redis
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          limits:
+            memory: 256Mi
+            cpu: 200m
+          requests:
+            memory: 128Mi
+            cpu: 50m
