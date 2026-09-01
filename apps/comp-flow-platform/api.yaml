@@ -55,10 +55,26 @@ spec:
       - name: wait-for-postgres
         image: busybox:1.36
         command: ['sh', '-c', 'until nc -z -v -w3 compflow-postgres.default.svc.cluster.local 5432; do echo "Waiting for postgres..."; sleep 2; done']
+      - name: run-migrations-and-seed
+        image: ghcr.io/pedrogriff/comp-flow-platform:latest
+        imagePullPolicy: Always
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Running Alembic migrations..."
+          python -m alembic upgrade head
+          echo "Seeding benchmark baseline datasets..."
+          python -m comp_flow.cli.main benchmark-seed || true
+          echo "Database migrations and seeding complete."
+        envFrom:
+        - configMapRef:
+            name: compflow-api-config
+        - secretRef:
+            name: compflow-api-secret
       containers:
       - name: api
         image: ghcr.io/pedrogriff/comp-flow-platform:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         envFrom:
         - configMapRef:
             name: compflow-api-config
