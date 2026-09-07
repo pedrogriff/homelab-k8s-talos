@@ -1,0 +1,233 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: compflow-sre-slo-rules
+  namespace: default
+  labels:
+    app: compflow-api
+    release: prometheus
+    role: sre-alert-rules
+spec:
+  groups:
+  # ============================================================================
+  # Group 1: CompFlow SLI Recording Rules (Multi-Window Traffic & Error Metrics)
+  # Target: 99.9% Availability SLO (Error Budget = 0.001)
+  # ============================================================================
+  - name: compflow.availability.sli.recording.rules
+    rules:
+    # 5-minute rates
+    - record: compflow:http_requests:rate5m
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api"}[5m])) or vector(0)
+    - record: compflow:http_errors:rate5m
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[5m])) or vector(0)
+    - record: compflow:http_error_ratio:rate5m
+      expr: (compflow:http_errors:rate5m / compflow:http_requests:rate5m) or vector(0)
+
+    # 30-minute rates
+    - record: compflow:http_requests:rate30m
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api"}[30m])) or vector(0)
+    - record: compflow:http_errors:rate30m
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[30m])) or vector(0)
+    - record: compflow:http_error_ratio:rate30m
+      expr: (compflow:http_errors:rate30m / compflow:http_requests:rate30m) or vector(0)
+
+    # 1-hour rates
+    - record: compflow:http_requests:rate1h
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api"}[1h])) or vector(0)
+    - record: compflow:http_errors:rate1h
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[1h])) or vector(0)
+    - record: compflow:http_error_ratio:rate1h
+      expr: (compflow:http_errors:rate1h / compflow:http_requests:rate1h) or vector(0)
+
+    # 2-hour rates
+    - record: compflow:http_requests:rate2h
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api"}[2h])) or vector(0)
+    - record: compflow:http_errors:rate2h
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[2h])) or vector(0)
+    - record: compflow:http_error_ratio:rate2h
+      expr: (compflow:http_errors:rate2h / compflow:http_requests:rate2h) or vector(0)
+
+    # 6-hour rates
+    - record: compflow:http_requests:rate6h
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api"}[6h])) or vector(0)
+    - record: compflow:http_errors:rate6h
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[6h])) or vector(0)
+    - record: compflow:http_error_ratio:rate6h
+      expr: (compflow:http_errors:rate6h / compflow:http_requests:rate6h) or vector(0)
+
+    # 1-day (24h) rates
+    - record: compflow:http_requests:rate1d
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api"}[1d])) or vector(0)
+    - record: compflow:http_errors:rate1d
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[1d])) or vector(0)
+    - record: compflow:http_error_ratio:rate1d
+      expr: (compflow:http_errors:rate1d / compflow:http_requests:rate1d) or vector(0)
+
+    # 3-day (72h) rates
+    - record: compflow:http_requests:rate3d
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api"}[3d])) or vector(0)
+    - record: compflow:http_errors:rate3d
+      expr: sum(rate(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[3d])) or vector(0)
+    - record: compflow:http_error_ratio:rate3d
+      expr: (compflow:http_errors:rate3d / compflow:http_requests:rate3d) or vector(0)
+
+    # 30-day Rolling Availability SLI & Error Budget Consumption
+    - record: compflow:availability:sli_30d
+      expr: (1 - (sum(increase(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[30d])) / sum(increase(compflow_http_requests_total{app="compflow-api"}[30d])))) * 100
+    - record: compflow:error_budget:remaining_percentage_30d
+      expr: clamp_min(clamp_max((1 - (sum(increase(compflow_http_requests_total{app="compflow-api", status_code=~"5.."}[30d])) / (0.001 * sum(increase(compflow_http_requests_total{app="compflow-api"}[30d]))))) * 100, 100), 0)
+
+  # ============================================================================
+  # Group 2: Latency SLI Recording Rules
+  # Target: 95% of requests < 250ms, 99% < 500ms
+  # ============================================================================
+  - name: compflow.latency.sli.recording.rules
+    rules:
+    - record: compflow:http_latency:p50
+      expr: histogram_quantile(0.50, sum(rate(compflow_http_request_duration_seconds_bucket{app="compflow-api"}[5m])) by (le))
+    - record: compflow:http_latency:p90
+      expr: histogram_quantile(0.90, sum(rate(compflow_http_request_duration_seconds_bucket{app="compflow-api"}[5m])) by (le))
+    - record: compflow:http_latency:p95
+      expr: histogram_quantile(0.95, sum(rate(compflow_http_request_duration_seconds_bucket{app="compflow-api"}[5m])) by (le))
+    - record: compflow:http_latency:p99
+      expr: histogram_quantile(0.99, sum(rate(compflow_http_request_duration_seconds_bucket{app="compflow-api"}[5m])) by (le))
+    - record: compflow:http_slow_requests:ratio_rate5m
+      expr: (1 - (sum(rate(compflow_http_request_duration_seconds_bucket{app="compflow-api", le="0.25"}[5m])) / sum(rate(compflow_http_request_duration_seconds_count{app="compflow-api"}[5m])))) or vector(0)
+    - record: compflow:http_slow_requests:ratio_rate1h
+      expr: (1 - (sum(rate(compflow_http_request_duration_seconds_bucket{app="compflow-api", le="0.25"}[1h])) / sum(rate(compflow_http_request_duration_seconds_count{app="compflow-api"}[1h])))) or vector(0)
+
+  # ============================================================================
+  # Group 3: Google SRE Multi-Window Multi-Burn-Rate (MWMBR) Alerts
+  # Target: 99.9% Availability (Error Budget Fraction E = 0.001)
+  # Reference: Google SRE Handbook Chapter 5, Table 5-8
+  # ============================================================================
+  - name: compflow.mwmbr.alerts
+    rules:
+    # Page: 14.4x burn rate over 1h AND 5m (burns 2% of budget in 1 hour)
+    - alert: CompFlowErrorBudgetFastBurnCritical
+      expr: |-
+        compflow:http_error_ratio:rate1h > (14.4 * 0.001)
+        and
+        compflow:http_error_ratio:rate5m > (14.4 * 0.001)
+        and
+        compflow:http_requests:rate5m > 1
+      for: 2m
+      labels:
+        severity: critical
+        tier: platform-sre
+        slo: availability-99.9
+        action: page
+      annotations:
+        summary: "CompFlow API Error Budget Fast Burn: 14.4x rate (Critical Page)"
+        description: "CompFlow API is burning error budget at 14.4x rate (current burn rate metric ratio={{ $value }}). At this rate, 2% of the monthly error budget is depleted within 1 hour."
+        runbook_url: "https://github.com/pedrogriff/homelab-k8s-talos/tree/main/apps/comp-flow-platform#runbook"
+
+    # Page: 6x burn rate over 6h AND 30m (burns 5% of budget in 6 hours)
+    - alert: CompFlowErrorBudgetModerateBurnCritical
+      expr: |-
+        compflow:http_error_ratio:rate6h > (6 * 0.001)
+        and
+        compflow:http_error_ratio:rate30m > (6 * 0.001)
+        and
+        compflow:http_requests:rate30m > 1
+      for: 5m
+      labels:
+        severity: critical
+        tier: platform-sre
+        slo: availability-99.9
+        action: page
+      annotations:
+        summary: "CompFlow API Error Budget Moderate Burn: 6x rate (Critical Page)"
+        description: "CompFlow API is burning error budget at 6x rate (current burn rate metric ratio={{ $value }}). At this rate, 5% of the monthly error budget is depleted within 6 hours."
+        runbook_url: "https://github.com/pedrogriff/homelab-k8s-talos/tree/main/apps/comp-flow-platform#runbook"
+
+    # Ticket: 3x burn rate over 1d AND 2h (burns 10% of budget in 24 hours)
+    - alert: CompFlowErrorBudgetSlowBurnWarning
+      expr: |-
+        compflow:http_error_ratio:rate1d > (3 * 0.001)
+        and
+        compflow:http_error_ratio:rate2h > (3 * 0.001)
+        and
+        compflow:http_requests:rate2h > 1
+      for: 15m
+      labels:
+        severity: warning
+        tier: platform-sre
+        slo: availability-99.9
+        action: ticket
+      annotations:
+        summary: "CompFlow API Error Budget Slow Burn: 3x rate (Warning Ticket)"
+        description: "CompFlow API is burning error budget at 3x rate over 24h. At this rate, 10% of the monthly error budget is depleted in 1 day."
+        runbook_url: "https://github.com/pedrogriff/homelab-k8s-talos/tree/main/apps/comp-flow-platform#runbook"
+
+    # Ticket: 1x burn rate over 3d AND 6h (burns 10% of budget in 3 days)
+    - alert: CompFlowErrorBudgetDepletionWarning
+      expr: |-
+        compflow:http_error_ratio:rate3d > (1 * 0.001)
+        and
+        compflow:http_error_ratio:rate6h > (1 * 0.001)
+        and
+        compflow:http_requests:rate6h > 1
+      for: 30m
+      labels:
+        severity: warning
+        tier: platform-sre
+        slo: availability-99.9
+        action: ticket
+      annotations:
+        summary: "CompFlow API Error Budget Sustained Depletion: 1x rate (Warning Ticket)"
+        description: "CompFlow API has sustained an error budget burn rate of 1x over 3 days, threatening monthly SLO compliance."
+        runbook_url: "https://github.com/pedrogriff/homelab-k8s-talos/tree/main/apps/comp-flow-platform#runbook"
+
+    # Latency SLI Burn Alert (Target: 95% < 250ms)
+    - alert: CompFlowLatencyBudgetBurnWarning
+      expr: |-
+        compflow:http_slow_requests:ratio_rate1h > 0.15
+        and
+        compflow:http_slow_requests:ratio_rate5m > 0.15
+        and
+        compflow:http_requests:rate5m > 1
+      for: 5m
+      labels:
+        severity: warning
+        tier: platform-sre
+        slo: latency-95pct-250ms
+        action: ticket
+      annotations:
+        summary: "CompFlow Latency Budget Burning (>15% requests > 250ms)"
+        description: "CompFlow API tail latency is exceeding the 250ms threshold at a rate of {{ $value | humanizePercentage }}, consuming the latency error budget."
+        runbook_url: "https://github.com/pedrogriff/homelab-k8s-talos/tree/main/apps/comp-flow-platform#runbook"
+
+  # ============================================================================
+  # Group 4: Total Rewards & Compensation Domain Guardrails
+  # ============================================================================
+  - name: compflow.domain.guardrail.alerts
+    rules:
+    - alert: CompFlowDepartmentBudgetExhaustion
+      expr: compflow_budget_depletion_ratio > 0.95
+      for: 5m
+      labels:
+        severity: warning
+        tier: solutions-engineering
+        domain: compensation
+      annotations:
+        summary: "Compensation Department Budget Pool Depleted (>95%)"
+        description: "Department {{ $labels.department_id }} in cycle {{ $labels.cycle_id }} has depleted {{ $value | humanizePercentage }} of its allocated pool."
+        runbook_url: "https://github.com/pedrogriff/homelab-k8s-talos/tree/main/apps/comp-flow-platform#budget-triage"
+
+    - alert: CompFlowAuditEscalationSurge
+      expr: |-
+        (
+          sum(rate(compflow_audit_requests_total{decision="ESCALATED"}[15m]))
+          /
+          sum(rate(compflow_audit_requests_total[15m]))
+        ) > 0.30
+      for: 10m
+      labels:
+        severity: warning
+        tier: solutions-engineering
+        domain: compensation
+      annotations:
+        summary: "Surge in Compensation Policy Audit Escalations (>30%)"
+        description: "Over 30% of candidate offers or review proposals are requiring executive escalation due to policy threshold breaches."
+        runbook_url: "https://github.com/pedrogriff/homelab-k8s-talos/tree/main/apps/comp-flow-platform#escalation-triage"

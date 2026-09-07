@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: compflow-api
+  namespace: default
+  labels:
+    app: compflow-api
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: compflow-api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 15s
+    scrapeTimeout: 10s
