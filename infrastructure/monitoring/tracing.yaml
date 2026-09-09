@@ -3,6 +3,34 @@
 # ==============================================================================
 
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app: otel-collector
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-gcp-wif
+  namespace: monitoring
+  labels:
+    app: otel-collector
+data:
+  google-application-credentials.json: |
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/1087429184512/locations/global/workloadIdentityPools/talos-homelab-pool/providers/talos-k8s-provider",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "credential_source": {
+        "file": "/var/run/secrets/tokens/gcp-token"
+      },
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/otel-collector-telemetry-sa@pedrogriff-cloud-production.iam.gserviceaccount.com:generateAccessToken"
+    }
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: otel-collector-config
@@ -41,6 +69,8 @@ data:
         endpoint: jaeger.monitoring.svc.cluster.local:4317
         tls:
           insecure: true
+      googlecloud:
+        project: pedrogriff-cloud-production
       debug:
         verbosity: basic
 
@@ -54,7 +84,7 @@ data:
         traces:
           receivers: [otlp]
           processors: [memory_limiter, resource, batch]
-          exporters: [otlp/jaeger, debug]
+          exporters: [otlp/jaeger, googlecloud, debug]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -73,13 +103,23 @@ spec:
       labels:
         app: otel-collector
     spec:
+      serviceAccountName: otel-collector
       containers:
       - name: otel-collector
         image: otel/opentelemetry-collector-contrib:0.119.0
         args: ["--config=/etc/otelcol/otel-collector-config.yaml"]
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /etc/gcp/google-application-credentials.json
         volumeMounts:
         - name: config
           mountPath: /etc/otelcol
+        - name: gcp-credentials
+          mountPath: /etc/gcp
+          readOnly: true
+        - name: gcp-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
         ports:
         - name: otlp-grpc
           containerPort: 4317
@@ -101,6 +141,16 @@ spec:
       - name: config
         configMap:
           name: otel-collector-config
+      - name: gcp-credentials
+        configMap:
+          name: otel-collector-gcp-wif
+      - name: gcp-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: gcp-token
+              expirationSeconds: 3600
+              audience: "//iam.googleapis.com/projects/1087429184512/locations/global/workloadIdentityPools/talos-homelab-pool/providers/talos-k8s-provider"
 ---
 apiVersion: v1
 kind: Service

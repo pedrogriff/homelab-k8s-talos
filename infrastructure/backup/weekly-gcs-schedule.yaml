@@ -1,0 +1,18 @@
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: weekly-gcs-offsite-backup
+  namespace: velero
+spec:
+  schedule: "0 3 * * 0" # Run weekly on Sunday at 03:00 UTC
+  template:
+    storageLocation: gcs-offsite
+    includedNamespaces:
+      - identity
+      - monitoring
+      - default
+      - storage
+      - arc-systems
+      - arc-runners
+    defaultVolumesToFsBackup: true
+    ttl: 2160h0m0s # 90-day retention before GCS lifecycle transitions to Coldline/Archive
