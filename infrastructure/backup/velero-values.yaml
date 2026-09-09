@@ -9,9 +9,16 @@ initContainers:
     volumeMounts:
       - mountPath: /target
         name: plugins
+  - name: velero-plugin-for-gcp
+    image: velero/velero-plugin-for-gcp:v1.11.1
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
 
 configuration:
   backupStorageLocation:
+    # 1. Primary on-premises fast backup (Local MinIO S3)
     - name: default
       provider: aws
       bucket: talos-backups
@@ -20,11 +27,33 @@ configuration:
         s3ForcePathStyle: "true"
         s3Url: http://minio.storage.svc.cluster.local:9000
         insecureSkipTLSVerify: "true"
+    # 2. Enterprise 3-2-1 Offsite Cloud Backup (Google Cloud Storage via WIF)
+    - name: gcs-offsite
+      provider: gcp
+      bucket: pedrogriff-talos-dr-coldline
+      credential:
+        name: velero-gcp-credentials
+        key: cloud
   volumeSnapshotLocation:
     - name: default
       provider: aws
       config:
         region: minio
+
+# Workload Identity Federation: Project K8s ServiceAccount token for keyless GCP authentication
+extraVolumes:
+  - name: gcp-token
+    projected:
+      sources:
+        - serviceAccountToken:
+            path: gcp-token
+            expirationSeconds: 3600
+            audience: "//iam.googleapis.com/projects/1087429184512/locations/global/workloadIdentityPools/talos-homelab-pool/providers/talos-k8s-provider"
+
+extraVolumeMounts:
+  - name: gcp-token
+    mountPath: /var/run/secrets/tokens
+    readOnly: true
 
 # Enable node-agent (Kopia / Restic) for volume backups of local-path PVs
 deployNodeAgent: true

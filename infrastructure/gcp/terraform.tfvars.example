@@ -1,0 +1,20 @@
+# ==============================================================================
+# Example OpenTofu / Terraform Variable Definitions
+# Copy to terraform.tfvars and customize for your GCP environment
+# ==============================================================================
+
+gcp_project_id      = "pedrogriff-cloud-production"
+gcp_project_number  = "1087429184512"
+gcp_region          = "us-central1"
+environment         = "production"
+k8s_cluster_name    = "talos-baremetal"
+
+# OIDC Issuer from Talos Linux Kubernetes control plane:
+# Discovered via: kubectl get --raw /.well-known/openid-configuration | jq -r .issuer
+k8s_oidc_issuer_url = "https://10.0.0.170:6443"
+
+# Cloud Storage Disaster Recovery Bucket
+gcs_dr_bucket_name  = "pedrogriff-talos-dr-coldline"
+gcs_storage_class   = "NEARLINE"
+
+enable_required_apis = true
