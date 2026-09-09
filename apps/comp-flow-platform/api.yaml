@@ -21,6 +21,9 @@ data:
   HOST: "0.0.0.0"
   PORT: "8000"
   DEBUG: "false"
+  OTEL_ENABLED: "true"
+  OTEL_SERVICE_NAME: "compflow-api"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4317"
 ---
 apiVersion: apps/v1
 kind: Deployment

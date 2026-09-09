@@ -1,0 +1,251 @@
+# ==============================================================================
+# OpenTelemetry Tracing Pipeline & Jaeger Backend for Talos Linux
+# ==============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+  labels:
+    app: otel-collector
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+      batch:
+        send_batch_size: 256
+        timeout: 1s
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: "production"
+            action: insert
+          - key: k8s.cluster.name
+            value: "talos-baremetal"
+            action: insert
+
+    exporters:
+      otlp/jaeger:
+        endpoint: jaeger.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+      debug:
+        verbosity: basic
+
+    service:
+      telemetry:
+        logs:
+          level: "info"
+        metrics:
+          address: "0.0.0.0:8888"
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/jaeger, debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:0.119.0
+        args: ["--config=/etc/otelcol/otel-collector-config.yaml"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otelcol
+        ports:
+        - name: otlp-grpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 250m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+      volumes:
+      - name: config
+        configMap:
+          name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app: otel-collector
+spec:
+  type: ClusterIP
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+  - name: metrics
+    port: 8888
+    targetPort: 8888
+    protocol: TCP
+  selector:
+    app: otel-collector
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: monitoring
+  labels:
+    app: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: jaegertracing/all-in-one:1.64.0
+        env:
+        - name: COLLECTOR_OTLP_ENABLED
+          value: "true"
+        - name: QUERY_BASE_PATH
+          value: "/"
+        ports:
+        - name: query
+          containerPort: 16686
+          protocol: TCP
+        - name: otlp-grpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: monitoring
+  labels:
+    app: jaeger
+spec:
+  type: ClusterIP
+  ports:
+  - name: query
+    port: 16686
+    targetPort: 16686
+    protocol: TCP
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+  selector:
+    app: jaeger
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jaeger-ingress
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: homelab-ca-issuer
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - jaeger.10.0.0.170.nip.io
+    secretName: jaeger-tls
+  rules:
+  - host: jaeger.10.0.0.170.nip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: jaeger
+            port:
+              number: 16686
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-tracing-datasource
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+    app: jaeger
+data:
+  tracing-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: "Jaeger"
+      type: jaeger
+      uid: jaeger
+      url: http://jaeger.monitoring.svc.cluster.local:16686
+      access: proxy
+      jsonData:
+        tracesToLogs:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
+        search:
+          hide: false
+        spanBar:
+          type: 'Tag'
+          tag: 'http.status_code'
