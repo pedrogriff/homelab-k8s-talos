@@ -20,13 +20,13 @@ data:
     class VestingRequest(BaseModel):
         total_shares: int = Field(description="Total equity grant units", ge=1)
         schedule_type: VestingScheduleType = Field(
-            default=VestingScheduleType.FRONT_LOADED_35_30_20_15,
+            default=VestingScheduleType.STANDARD_EQUAL_4YR,
             description="Vesting schedule model"
         )
 
     @mcp.tool()
     def calculate_equity_vesting(req: VestingRequest) -> Dict[str, Any]:
-        percentages = [0.33333333, 0.33333333, 0.22222222, 0.11111111] if req.schedule_type == VestingScheduleType.FRONT_LOADED_35_30_20_15 else [0.25] * 4
+        percentages = [0.35, 0.30, 0.20, 0.15] if req.schedule_type == VestingScheduleType.FRONT_LOADED_35_30_20_15 else [0.25] * 4
         floored = [int(req.total_shares * p) for p in percentages]
         remainders = [req.total_shares * p - f for p, f in zip(percentages, floored)]
         
@@ -54,7 +54,7 @@ data:
     class SalaryAuditRequest(BaseModel):
         proposed_salary: float = Field(description="Proposed annual base salary in USD", gt=0)
         job_level: str = Field(description="Synthetic IC level (e.g. 'IC2', 'IC3', 'IC4', 'IC5')")
-        location: str = Field(description="Office location code (e.g. 'US-ZONE-A', 'US-ZONE-B')")
+        location: str = Field(description="Synthetic pay zone code (e.g. 'US-ZONE-A', 'US-ZONE-B', 'US-ZONE-C')")
 
     SALARY_BANDS: Dict[tuple, Dict[str, float]] = {
         ("IC4", "US-ZONE-A"): {"min": 190000.0, "mid": 220000.0, "max": 250000.0},

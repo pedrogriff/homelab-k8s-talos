@@ -24,7 +24,7 @@ class VestingScheduleType(str, Enum):
 class VestingRequest(BaseModel):
     total_shares: int = Field(description="Total equity grant units (e.g. 1000 RSUs)", ge=1)
     schedule_type: VestingScheduleType = Field(
-        default=VestingScheduleType.FRONT_LOADED_35_30_20_15,
+        default=VestingScheduleType.STANDARD_EQUAL_4YR,
         description="Vesting schedule model: 'FRONT_LOADED_35_30_20_15' or 'STANDARD_EQUAL_4YR'"
     )
 
@@ -32,10 +32,10 @@ class VestingRequest(BaseModel):
 def calculate_equity_vesting(req: VestingRequest) -> Dict[str, Any]:
     """
     Calculates exact annual share vesting using the Largest Remainder Method
-    to guarantee zero fractional share loss across vesting tranches.
+    so the 4 yearly tranches add up to the total grant.
     """
     if req.schedule_type == VestingScheduleType.FRONT_LOADED_35_30_20_15:
-        percentages = [0.33333333, 0.33333333, 0.22222222, 0.11111111]
+        percentages = [0.35, 0.30, 0.20, 0.15]
     else:
         percentages = [0.25, 0.25, 0.25, 0.25]
 
@@ -74,9 +74,9 @@ class BandStatus(str, Enum):
 class SalaryAuditRequest(BaseModel):
     proposed_salary: float = Field(description="Proposed annual base salary in USD", gt=0)
     job_level: str = Field(description="Synthetic IC level (e.g. 'IC2', 'IC3', 'IC4', 'IC5')")
-    location: str = Field(description="Office location code (e.g. 'US-ZONE-A', 'US-ZONE-B', 'US-ZONE-C')")
+    location: str = Field(description="Synthetic pay zone code (e.g. 'US-ZONE-A', 'US-ZONE-B', 'US-ZONE-C')")
 
-# Mock Compensation Salary Grid (Production backed by PostgreSQL)
+# Synthetic salary bands, hardcoded for this demo
 SALARY_BANDS: Dict[tuple, Dict[str, float]] = {
     ("IC4", "US-ZONE-A"): {"min": 190000.0, "mid": 220000.0, "max": 250000.0},
     ("IC3", "US-ZONE-A"): {"min": 150000.0, "mid": 175000.0, "max": 200000.0},
@@ -88,7 +88,7 @@ SALARY_BANDS: Dict[tuple, Dict[str, float]] = {
 @mcp.tool()
 def audit_salary_band_compliance(req: SalaryAuditRequest) -> Dict[str, Any]:
     """
-    Audits a proposed salary against official geographical pay bands,
+    Audits a proposed salary against synthetic pay zone bands,
     calculates exact Compa-Ratio, and determines compliance status.
     """
     grid_key = (req.job_level, req.location)

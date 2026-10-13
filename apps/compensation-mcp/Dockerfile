@@ -1,5 +1,5 @@
 # ==============================================================================
-# Multi-Stage Production Dockerfile for Compensation FastMCP Microservice
+# Multi-stage Dockerfile for the Compensation MCP demo service
 # ==============================================================================
 
 # --- Stage 1: Build & Dependencies ---
@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# --- Stage 2: Minimal Distroless/Non-Root Runtime ---
+# --- Stage 2: Slim non-root runtime ---
 FROM python:3.13-slim AS runner
 
 WORKDIR /app

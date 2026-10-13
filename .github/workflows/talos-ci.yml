@@ -29,7 +29,7 @@ jobs:
           print(f'Python Runtime: {sys.version}')
           # Test Largest Remainder Method Invariant
           total = 1500
-          shares = [int(total * p) for p in [0.33333333, 0.33333333, 0.22222222, 0.11111111]]
+          shares = [int(total * p) for p in [0.35, 0.30, 0.20, 0.15]]
           unallocated = total - sum(shares)
           for i in range(unallocated):
               shares[i] += 1
