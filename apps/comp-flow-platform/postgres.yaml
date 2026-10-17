@@ -1,15 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: compflow-postgres-secret
-  namespace: default
-type: Opaque
-stringData:
-  POSTGRES_DB: compflow
-  POSTGRES_USER: postgres
-  POSTGRES_PASSWORD: compflow-prod-db-password-2026
----
-apiVersion: v1
 kind: Service
 metadata:
   name: compflow-postgres
@@ -49,17 +38,17 @@ spec:
         - name: POSTGRES_DB
           valueFrom:
             secretKeyRef:
-              name: compflow-postgres-secret
+              name: compflow-postgres-credentials
               key: POSTGRES_DB
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
-              name: compflow-postgres-secret
+              name: compflow-postgres-credentials
               key: POSTGRES_USER
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: compflow-postgres-secret
+              name: compflow-postgres-credentials
               key: POSTGRES_PASSWORD
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata

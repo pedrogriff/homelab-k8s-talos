@@ -1,14 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: compflow-api-secret
-  namespace: default
-type: Opaque
-stringData:
-  SECRET_KEY: compflow-enterprise-production-jwt-secret-2026-secure
-  MASTER_API_KEY: compflow-master-service-key-2026
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: compflow-api-config
@@ -16,7 +6,6 @@ metadata:
 data:
   APP_NAME: "CompFlow Platform"
   ENVIRONMENT: "production"
-  DATABASE_URL: "postgresql+asyncpg://postgres:compflow-prod-db-password-2026@compflow-postgres.default.svc.cluster.local:5432/compflow"
   REDIS_URL: "redis://compflow-redis.default.svc.cluster.local:6379/0"
   HOST: "0.0.0.0"
   PORT: "8000"
@@ -73,7 +62,7 @@ spec:
         - configMapRef:
             name: compflow-api-config
         - secretRef:
-            name: compflow-api-secret
+            name: compflow-api-credentials
       containers:
       - name: api
         image: ghcr.io/pedrogriff/comp-flow-platform:latest
@@ -82,7 +71,7 @@ spec:
         - configMapRef:
             name: compflow-api-config
         - secretRef:
-            name: compflow-api-secret
+            name: compflow-api-credentials
         ports:
         - containerPort: 8000
           name: http

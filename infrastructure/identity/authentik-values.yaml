@@ -3,11 +3,22 @@
 # ==============================================================================
 
 authentik:
-  # Secret key used for session signing and internal cryptography
-  secret_key: "authentik-super-secret-key-homelab-pedrogriff-2026-production-ready"
   log_level: "info"
-  postgresql:
-    password: "AuthentikSecureDbPassword2026!"
+
+# The secret key and database passwords come from the authentik-credentials Secret,
+# which is encrypted with SOPS in infrastructure/identity/authentik.secret.yaml.
+global:
+  env:
+    - name: AUTHENTIK_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: authentik-credentials
+          key: secret-key
+    - name: AUTHENTIK_POSTGRESQL__PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-credentials
+          key: password
 
 server:
   replicas: 1
@@ -51,7 +62,7 @@ postgresql:
   auth:
     database: "authentik"
     username: "authentik"
-    password: "AuthentikSecureDbPassword2026!"
+    existingSecret: "authentik-credentials"
   primary:
     persistence:
       enabled: true
