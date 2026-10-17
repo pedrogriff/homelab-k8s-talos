@@ -1,4 +1,4 @@
-# 🚀 Production-Grade Kubernetes Homelab on Proxmox VE with Talos Linux
+# Kubernetes homelab on Proxmox VE with Talos Linux
 
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.2-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![Talos Linux](https://img.shields.io/badge/Talos_Linux-v1.13.8-orange?logo=linux&logoColor=white)](https://www.talos.dev/)
@@ -7,7 +7,7 @@
 [![Disaster Recovery](https://img.shields.io/badge/Disaster_Recovery-Velero_%26_MinIO_S3-0052CC?logo=minio&logoColor=white)](https://velero.io/)
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-Actions_Runner_Controller_(ARC)-black?logo=githubactions&logoColor=white)](https://github.com/actions/actions-runner-controller)
 [![SSO](https://img.shields.io/badge/Identity-Authentik_OIDC_SSO-blue?logo=authentik&logoColor=white)](https://goauthentik.io/)
-[![MCP](https://img.shields.io/badge/Protocol-Model_Context_Protocol_(MCP)-8A2BE2)](https://modelcontextprotocol.io/)
+[![Tools](https://img.shields.io/badge/Tools-REST_API,_MCP_planned-8A2BE2)](https://modelcontextprotocol.io/)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
 [![Hubble](https://img.shields.io/badge/Observability-Hubble_UI-purple)](https://cilium.io/)
 [![Prometheus](https://img.shields.io/badge/Metrics-Prometheus-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
@@ -17,7 +17,14 @@
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik Enterprise OIDC Single Sign-On**, protected by **Velero & MinIO S3 Cloud-Native Disaster Recovery**, serving **Autonomous FastMCP Microservices**, executing **Self-Hosted CI/CD via Actions Runner Controller (ARC)**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik OIDC single sign-on**, protected by **Velero and MinIO S3 backups**, serving **REST endpoints for demo vesting and salary band tools**, executing **Self-Hosted CI/CD via Actions Runner Controller (ARC)**, and managed via **GitOps (ArgoCD)**.
+
+## What runs on this cluster
+The `homelab-apps` Application in `infrastructure/gitops/homelab-apps.yaml` tells ArgoCD to deploy every manifest under `apps/`. These are the apps it runs:
+- [comp-flow-platform](https://github.com/pedrogriff/comp-flow-platform), from `apps/comp-flow-platform/`: 2 API replicas, Postgres 16 on a 10Gi volume, Redis 7, an ingress, a Prometheus ServiceMonitor, SLO and burn-rate alert rules, and a Grafana dashboard.
+- The compensation MCP demo, from `apps/compensation-mcp/`, on synthetic data. Its vesting tool at `/api/v1/vesting` splits a grant into 4 yearly tranches with the largest remainder method, the same method as [vesting-sim-engine](https://github.com/pedrogriff/vesting-sim-engine).
+- Uptime Kuma from `apps/monitoring/` and a 3-replica podinfo test app from `apps/demo/`.
+My current project is [comp-insight-advisor](https://github.com/pedrogriff/comp-insight-advisor). I plan to serve its deterministic tools from this cluster.
 
 ---
 
@@ -117,7 +124,7 @@ flowchart TD
 * Deploys a **2-Tier PKI**: A 10-year self-signed Root Certificate Authority generates an intermediate `ClusterIssuer` that signs and auto-renews 90-day application certificates on the fly.
 
 ### 5. Why GitOps with ArgoCD?
-* **Git as Single Source of Truth:** Cluster desired state is version-controlled on GitHub. Manual `kubectl apply` commands on production are eliminated.
+* **Git as Single Source of Truth:** Cluster desired state is version-controlled on GitHub. ArgoCD applies everything under `apps/`, so app changes go through Git instead of manual `kubectl apply`.
 * **Automated Reconciliation & Self-Healing:** ArgoCD continuously detects configuration drift and automatically restores modified or deleted cluster resources back to Git state.
 
 ### 6. Why eBPF Networking with Cilium & Hubble?
@@ -133,9 +140,9 @@ flowchart TD
 * **Isolation of Concerns:** Control-plane resources (`etcd`, API server, Scheduler) are isolated from noisy user workloads.
 * **High Availability & Anti-Affinity:** Microservice replicas are distributed across separate physical/virtual nodes, ensuring zero downtime if a worker node undergoes maintenance or failure.
 
-### 9. Why Agentic Integration via Model Context Protocol (MCP)?
-* **Decoupled Architecture:** Separates LLM reasoning (Antigravity/Gemini) from deterministic execution (Largest Remainder Method calculations).
-* **Zero Math Hallucination:** Offloads financial rounding and pay band audits to dedicated, containerized Python microservices running securely in-cluster.
+### 9. Why a separate service for deterministic tools?
+* **Math stays out of the model.** An LLM agent can call the vesting and salary band tools instead of doing the arithmetic itself.
+* **REST today, MCP planned.** The service exposes the tools as REST endpoints at `/api/v1/vesting` and `/api/v1/salary-audit`. The code registers them with FastMCP, but no MCP endpoint is served yet.
 
 ### 10. Why Centralized Identity & Role-Based Access Control (Authentik OIDC SSO)?
 * **Eliminates Identity Fragmentation:** Centralizes user accounts, MFA, and access revocation in a unified IdP.
@@ -147,7 +154,7 @@ flowchart TD
 * **Cost Efficiency:** Scales to 0 pods when idle, bursting up to 5 parallel runners on demand.
 
 ### 12. Why Cloud-Native Disaster Recovery with Velero & MinIO S3?
-* **Strict RPO / RTO Guarantees:** Enforces 30-day automated daily snapshots of all cluster PersistentVolumes and serialized Kubernetes CRDs to S3 object storage.
+* **Daily and weekly backups.** Velero backs up 6 namespaces and their volumes to MinIO every day at 02:00 UTC and keeps each backup for 30 days. A weekly backup goes to Google Cloud Storage every Sunday, and Velero keeps it for 90 days.
 * **Non-Corrupt Volume Snapshots:** Uses Kopia / Restic node-agents to freeze I/O and capture atomic disk backups across active PostgreSQL and Prometheus TSDB databases.
 * **Instant Recovery:** Enables complete cluster reconstruction with a single `velero restore create` command.
 
@@ -161,7 +168,7 @@ flowchart TD
 │       └── talos-ci.yml            # Self-hosted CI workflow executing on talos-runner
 ├── .gitignore                      # Prevents committing credentials/private keys
 ├── .sops.yaml                      # Asymmetric Age encryption configuration for GitOps
-├── README.md                       # Infrastructure documentation & portfolio showcase
+├── README.md                       # Infrastructure documentation
 ├── cluster-config/                 # Talos Machine Configurations
 │   ├── controlplane.example.yaml   # Template config for Control Plane nodes
 │   └── worker.example.yaml         # Template config for scaling Worker nodes
@@ -176,6 +183,7 @@ flowchart TD
 │   ├── cicd/
 │   │   ├── runner-scale-set-values.yaml # ARC Runner Scale Set (runs-on: talos-runner)
 │   │   └── arc-github-token.secret.yaml # SOPS-encrypted GitHub PAT
+│   ├── gcp/                        # Terraform for the GCS backup bucket, Workload Identity Federation and Cloud Trace access
 │   ├── identity/
 │   │   └── authentik-values.yaml   # Authentik IdP (Postgres 5Gi, Redis, Ingress TLS)
 │   ├── gitops/
@@ -185,7 +193,8 @@ flowchart TD
 │   ├── monitoring/
 │   │   ├── prometheus-values.yaml  # kube-prometheus-stack + Grafana OIDC Generic OAuth
 │   │   ├── grafana-ingress.yaml    # Grafana Dashboard HTTPS Ingress
-│   │   └── grafana-sso.secret.yaml # SOPS-encrypted Grafana OAuth client secret
+│   │   ├── grafana-sso.secret.yaml # SOPS-encrypted Grafana OAuth client secret
+│   │   └── tracing.yaml            # OpenTelemetry Collector, Jaeger and Cloud Trace export
 │   ├── networking/
 │   │   ├── cilium-values.yaml      # Cilium eBPF & Hubble Helm values
 │   │   ├── hubble-ingress.yaml     # Hubble UI Ingress with TLS
@@ -197,6 +206,7 @@ flowchart TD
 │       ├── ingress-nginx.yaml      # NGINX Ingress Controller deployment
 │       └── ingress-routes.yaml     # Layer 7 Ingress routing rules with TLS
 └── apps/                           # Deployed Application Workloads (Managed via GitOps)
+    ├── comp-flow-platform/         # comp-flow-platform API, Postgres, Redis, Ingress, SLO alerts and Grafana dashboard
     ├── compensation-mcp/           # Compensation MCP demo service on synthetic data
     │   ├── src/server.py           # FastMCP tools & FastAPI health endpoints
     │   ├── Dockerfile              # Multi-stage non-root container specification
@@ -257,7 +267,7 @@ kubectl apply -f infrastructure/ingress/ingress-routes.yaml
 helm upgrade --install cilium cilium/cilium --namespace kube-system -f infrastructure/networking/cilium-values.yaml
 kubectl apply -f infrastructure/networking/hubble-ingress.yaml
 
-# Deploy Authentik Enterprise Identity Provider
+# Deploy Authentik Identity Provider
 helm upgrade --install authentik authentik/authentik --namespace identity -f infrastructure/identity/authentik-values.yaml
 
 # Deploy Prometheus & Grafana Observability Stack (with OIDC Single Sign-On)
@@ -288,7 +298,7 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 
 > **Golden Rule of DevOps:** Live cluster secrets, tokens, and private keys (`talosconfig`, `kubeconfig`, raw `controlplane.yaml`, `worker.yaml`) are strictly excluded from Git via `.gitignore`.
 > 
-> Production GitOps secrets are encrypted using **SOPS & Age asymmetric cryptography** with selective regex rules (`.sops.yaml`), ensuring only ciphertext is committed to GitHub while Kubernetes decrypts in-memory.
+> Secret manifests named `*.secret.yaml` are encrypted with **SOPS and age** using the rule in `.sops.yaml`, so Git stores only their ciphertext. Decrypt and apply them with `sops -d FILE | kubectl apply -f -`. ArgoCD does not decrypt them.
 
 ---
 
@@ -304,7 +314,7 @@ kubectl apply -f infrastructure/gitops/homelab-apps.yaml
 | **Inspect Authentik Identity Provider** | `kubectl get pods,pvc,ingress -n identity` |
 | **Inspect MinIO S3 Object Storage** | `kubectl get pods,pvc,ingress -n storage` |
 | **Inspect FastMCP Microservice** | `kubectl get pods,svc,ingress -l app=compensation-mcp` |
-| **Test MCP Vesting Endpoint** | `curl -k -s -X POST https://mcp.10.0.0.170.nip.io/api/v1/vesting -H "Content-Type: application/json" -d '{"total_shares": 1500, "schedule_type": "FRONT_LOADED_35_30_20_15"}'` |
+| **Test Vesting REST Endpoint** | `curl -k -s -X POST https://mcp.10.0.0.170.nip.io/api/v1/vesting -H "Content-Type: application/json" -d '{"total_shares": 1500, "schedule_type": "FRONT_LOADED_35_30_20_15"}'` |
 | **Inspect All Cluster Nodes** | `kubectl get nodes -o wide` |
 | **Inspect Workload Distribution Across Nodes** | `kubectl get pods -A -o wide --sort-by='.spec.nodeName'` |
 | **Inspect Monitoring Stack** | `kubectl get pods,pvc,ingress -n monitoring` |

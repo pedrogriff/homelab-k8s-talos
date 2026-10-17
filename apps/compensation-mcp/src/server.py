@@ -3,7 +3,7 @@
 Compensation MCP demo service on synthetic data
 ==============================================================================
 Provides deterministic tools for equity vesting calculations and salary band
-compliance auditing over Model Context Protocol (MCP) and HTTP REST.
+compliance checks as HTTP REST endpoints. An MCP endpoint is planned.
 """
 
 from enum import Enum
@@ -121,7 +121,7 @@ def audit_salary_band_compliance(req: SalaryAuditRequest) -> Dict[str, Any]:
 app = FastAPI(
     title="Compensation MCP Demo API",
     version="1.0.0",
-    description="Model Context Protocol microservice for automated compensation workflows."
+    description="REST endpoints for the demo vesting and salary band tools. An MCP endpoint is planned."
 )
 
 @app.get("/healthz", status_code=status.HTTP_200_OK)
