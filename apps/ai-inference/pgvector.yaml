@@ -1,0 +1,120 @@
+# ==============================================================================
+# Dedicated pgvector (PostgreSQL 16 + HNSW/IVFFlat Vector Extension) for AI RAG
+# ==============================================================================
+# Automatically initializes the `vector` extension on first boot for semantic
+# policy retrieval, agent memory, and hybrid SQL + dense embedding queries.
+# ==============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-pgvector-init
+  namespace: default
+  labels:
+    app: ai-pgvector
+data:
+  01-init-vector.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-pgvector
+  namespace: default
+  labels:
+    app: ai-pgvector
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgresql
+  clusterIP: None
+  selector:
+    app: ai-pgvector
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ai-pgvector
+  namespace: default
+  labels:
+    app: ai-pgvector
+spec:
+  serviceName: ai-pgvector
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-pgvector
+  template:
+    metadata:
+      labels:
+        app: ai-pgvector
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: talos-k7w-qm2
+      containers:
+        - name: pgvector
+          image: pgvector/pgvector:pg16
+          env:
+            - name: POSTGRES_DB
+              value: "ai_harness"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: compflow-postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: compflow-postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+              name: postgresql
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - ai_harness
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - postgres
+                - -d
+                - ai_harness
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: pgvector-storage
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: ai-pgvector-init
+  volumeClaimTemplates:
+    - metadata:
+        name: pgvector-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "local-path"
+        resources:
+          requests:
+            storage: 5Gi

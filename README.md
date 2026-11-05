@@ -7,7 +7,7 @@
 [![Disaster Recovery](https://img.shields.io/badge/Disaster_Recovery-Velero_%26_MinIO_S3-0052CC?logo=minio&logoColor=white)](https://velero.io/)
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-Actions_Runner_Controller_(ARC)-black?logo=githubactions&logoColor=white)](https://github.com/actions/actions-runner-controller)
 [![SSO](https://img.shields.io/badge/Identity-Authentik_OIDC_SSO-blue?logo=authentik&logoColor=white)](https://goauthentik.io/)
-[![Tools](https://img.shields.io/badge/Tools-REST_API,_MCP_planned-8A2BE2)](https://modelcontextprotocol.io/)
+[![Tools](https://img.shields.io/badge/Tools-REST_API_%26_MCP_SSE-8A2BE2)](https://modelcontextprotocol.io/)
 [![eBPF](https://img.shields.io/badge/eBPF-Cilium_v1.20-blue?logo=cilium&logoColor=white)](https://cilium.io/)
 [![Hubble](https://img.shields.io/badge/Observability-Hubble_UI-purple)](https://cilium.io/)
 [![Prometheus](https://img.shields.io/badge/Metrics-Prometheus-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
@@ -17,12 +17,13 @@
 [![TLS](https://img.shields.io/badge/cert--manager-v1.17.1-blue?logo=letsencrypt&logoColor=white)](https://cert-manager.io/)
 [![Storage](https://img.shields.io/badge/StorageClass-Local_Path_CSI-blue)](https://github.com/rancher/local-path-provisioner)
 
-A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik OIDC single sign-on**, protected by **Velero and MinIO S3 backups**, serving **REST endpoints for demo vesting and salary band tools**, executing **Self-Hosted CI/CD via Actions Runner Controller (ARC)**, and managed via **GitOps (ArgoCD)**.
+A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructure built from bare-metal virtualization on **Proxmox VE** using **Talos Linux (v1.13.8)**, powered by **Cilium eBPF Networking**, observed via **Prometheus & Grafana**, secured with **Authentik OIDC single sign-on**, protected by **Velero and MinIO S3 backups**, serving **REST and MCP SSE endpoints for deterministic tools**, running **in-cluster Ollama & pgvector AI inference**, executing **Self-Hosted CI/CD via Actions Runner Controller (ARC)**, and managed via **GitOps (ArgoCD)**.
 
 ## What runs on this cluster
 The `homelab-apps` Application in `infrastructure/gitops/homelab-apps.yaml` tells ArgoCD to deploy every manifest under `apps/`. These are the apps it runs:
 - [comp-flow-platform](https://github.com/pedrogriff/comp-flow-platform), from `apps/comp-flow-platform/`: 2 API replicas, Postgres 16 on a 10Gi volume, Redis 7, an ingress, a Prometheus ServiceMonitor, SLO and burn-rate alert rules, and a Grafana dashboard.
-- The compensation MCP demo, from `apps/compensation-mcp/`, on synthetic data. Its vesting tool at `/api/v1/vesting` splits a grant into 4 yearly tranches with the largest remainder method, the same method as [vesting-sim-engine](https://github.com/pedrogriff/vesting-sim-engine).
+- The compensation MCP service, from `apps/compensation-mcp/`, on synthetic data. It exposes both REST endpoints (`/api/v1/vesting`, `/api/v1/salary-audit`) and a live Model Context Protocol (MCP) SSE transport at `/mcp/sse` and `/mcp/messages/`. Its vesting tool splits a grant into 4 yearly tranches with the largest remainder method, the same method as [vesting-sim-engine](https://github.com/pedrogriff/vesting-sim-engine).
+- In-cluster AI inference & vector storage, from `apps/ai-inference/`: **Ollama** (`ollama.10.0.0.170.nip.io`) on a 30Gi persistent volume preloaded with `nomic-embed-text`, and **pgvector** (`ai-pgvector` on PostgreSQL 16 with the `vector` 0.8.6 extension) on a 5Gi volume.
 - Uptime Kuma from `apps/monitoring/` and a 3-replica podinfo test app from `apps/demo/`.
 My current project is [comp-insight-advisor](https://github.com/pedrogriff/comp-insight-advisor). I plan to serve its deterministic tools from this cluster.
 
@@ -142,7 +143,7 @@ flowchart TD
 
 ### 9. Why a separate service for deterministic tools?
 * **Math stays out of the model.** An LLM agent can call the vesting and salary band tools instead of doing the arithmetic itself.
-* **REST today, MCP planned.** The service exposes the tools as REST endpoints at `/api/v1/vesting` and `/api/v1/salary-audit`. The code registers them with FastMCP, but no MCP endpoint is served yet.
+* **REST and MCP SSE.** The service exposes the tools both as REST endpoints (`/api/v1/vesting` and `/api/v1/salary-audit`) and as a live FastMCP Server-Sent Events (SSE) endpoint at `/mcp/sse` (with tool metadata at `/mcp/status`), routed through NGINX Ingress with proxy buffering disabled.
 
 ### 10. Why Centralized Identity & Role-Based Access Control (Authentik OIDC SSO)?
 * **Eliminates Identity Fragmentation:** Centralizes user accounts, MFA, and access revocation in a unified IdP.
@@ -198,6 +199,7 @@ flowchart TD
 │   ├── networking/
 │   │   ├── cilium-values.yaml      # Cilium eBPF & Hubble Helm values
 │   │   ├── hubble-ingress.yaml     # Hubble UI Ingress with TLS
+│   │   ├── kubelet-api-rbac.yaml   # ClusterRoleBinding for kube-apiserver to kubelet proxy
 │   │   └── security-policy.yaml    # CiliumNetworkPolicy L7 Zero-Trust rules
 │   ├── storage/
 │   │   ├── local-path-storage.yaml # Local Path Provisioner (StorageClass: local-path)
@@ -206,9 +208,12 @@ flowchart TD
 │       ├── ingress-nginx.yaml      # NGINX Ingress Controller deployment
 │       └── ingress-routes.yaml     # Layer 7 Ingress routing rules with TLS
 └── apps/                           # Deployed Application Workloads (Managed via GitOps)
+    ├── ai-inference/               # In-cluster AI inference & vector storage
+    │   ├── ollama.yaml             # Ollama engine (30Gi PVC, Ingress TLS, nomic-embed-text)
+    │   └── pgvector.yaml           # PostgreSQL 16 + pgvector StatefulSet (5Gi PVC)
     ├── comp-flow-platform/         # comp-flow-platform API, Postgres, Redis, Ingress, SLO alerts and Grafana dashboard
-    ├── compensation-mcp/           # Compensation MCP demo service on synthetic data
-    │   ├── src/server.py           # FastMCP tools & FastAPI health endpoints
+    ├── compensation-mcp/           # Compensation MCP service on synthetic data (REST & MCP SSE)
+    │   ├── src/server.py           # FastMCP SSE tools & FastAPI REST/health endpoints
     │   ├── Dockerfile              # Multi-stage non-root container specification
     │   ├── requirements.txt        # Pinned microservice dependencies
     │   └── k8s/

@@ -504,9 +504,10 @@ spec:
         - mountPath: /usr/local/certificates/
           name: webhook-cert
           readOnly: true
-      dnsPolicy: ClusterFirst
+      dnsPolicy: ClusterFirstWithHostNet
       nodeSelector:
         kubernetes.io/os: linux
+        kubernetes.io/hostname: talos-k7w-qm2
       serviceAccountName: ingress-nginx
       terminationGracePeriodSeconds: 300
       volumes:

@@ -3,14 +3,18 @@
 Compensation MCP demo service on synthetic data
 ==============================================================================
 Provides deterministic tools for equity vesting calculations and salary band
-compliance checks as HTTP REST endpoints. An MCP endpoint is planned.
+compliance checks as both HTTP REST endpoints and a live Model Context Protocol
+(MCP) Server-Sent Events (SSE) transport at /mcp/sse and /mcp/messages/.
 """
 
 from enum import Enum
 from typing import Dict, Any, List
 from fastapi import FastAPI, Response, status
 from mcp.server.fastmcp import FastMCP
+from mcp.server.sse import SseServerTransport
 from pydantic import BaseModel, Field
+from starlette.applications import Starlette
+from starlette.routing import Mount, Route
 
 # 1. Initialize FastMCP Server
 mcp = FastMCP("Compensation-MCP-Demo")
@@ -116,18 +120,35 @@ def audit_salary_band_compliance(req: SalaryAuditRequest) -> Dict[str, Any]:
         "requires_exception_workflow": status_val == BandStatus.VP_APPROVAL_REQUIRED
     }
 
-# --- 2. FastAPI Application Wrapper for Health Checks & REST ---
+# --- 2. FastAPI Application Wrapper for Health Checks, REST & MCP SSE ---
 
 app = FastAPI(
     title="Compensation MCP Demo API",
-    version="1.0.0",
-    description="REST endpoints for the demo vesting and salary band tools. An MCP endpoint is planned."
+    version="1.1.0",
+    description="REST and MCP SSE endpoints for deterministic equity vesting and salary band tools."
 )
 
 @app.get("/healthz", status_code=status.HTTP_200_OK)
 async def health_check():
     """Kubernetes Liveness and Readiness Probe Endpoint."""
-    return {"status": "HEALTHY", "service": "compensation-mcp-engine"}
+    return {
+        "status": "HEALTHY",
+        "service": "compensation-mcp-engine",
+        "mcp_sse_endpoint": "/mcp/sse",
+        "mcp_messages_endpoint": "/mcp/messages/",
+    }
+
+@app.get("/mcp/status", status_code=status.HTTP_200_OK)
+async def mcp_status():
+    """Returns registered MCP tools and transport metadata."""
+    tools = await mcp.list_tools()
+    return {
+        "server": mcp.name,
+        "transport": "sse",
+        "sse_endpoint": "/mcp/sse",
+        "messages_endpoint": "/mcp/messages/",
+        "tools": [t.name for t in tools],
+    }
 
 @app.post("/api/v1/vesting")
 async def api_vesting(req: VestingRequest):
@@ -138,3 +159,25 @@ async def api_vesting(req: VestingRequest):
 async def api_salary_audit(req: SalaryAuditRequest):
     """Direct REST endpoint for salary band compliance audit."""
     return audit_salary_band_compliance(req)
+
+# --- 3. Mount Live MCP SSE Transport at /mcp ---
+sse_transport = SseServerTransport("/mcp/messages/")
+
+async def handle_mcp_sse(request):
+    async with sse_transport.connect_sse(
+        request.scope, request.receive, request._send
+    ) as streams:
+        await mcp._mcp_server.run(
+            streams[0],
+            streams[1],
+            mcp._mcp_server.create_initialization_options(),
+        )
+
+mcp_sse_app = Starlette(
+    routes=[
+        Route("/sse", endpoint=handle_mcp_sse),
+        Mount("/messages/", app=sse_transport.handle_post_message),
+    ],
+)
+
+app.mount("/mcp", mcp_sse_app)

@@ -9,7 +9,10 @@ data:
     from typing import Dict, Any, List
     from fastapi import FastAPI, Response, status
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.sse import SseServerTransport
     from pydantic import BaseModel, Field
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
 
     mcp = FastMCP("Compensation-MCP-Demo")
 
@@ -26,23 +29,29 @@ data:
 
     @mcp.tool()
     def calculate_equity_vesting(req: VestingRequest) -> Dict[str, Any]:
-        percentages = [0.35, 0.30, 0.20, 0.15] if req.schedule_type == VestingScheduleType.FRONT_LOADED_35_30_20_15 else [0.25] * 4
-        floored = [int(req.total_shares * p) for p in percentages]
-        remainders = [req.total_shares * p - f for p, f in zip(percentages, floored)]
-        
-        for i in sorted(range(len(remainders)), key=lambda k: remainders[k], reverse=True)[:req.total_shares - sum(floored)]:
-            floored[i] += 1
+        if req.schedule_type == VestingScheduleType.FRONT_LOADED_35_30_20_15:
+            percentages = [0.35, 0.30, 0.20, 0.15]
+        else:
+            percentages = [0.25, 0.25, 0.25, 0.25]
+
+        raw_shares = [req.total_shares * p for p in percentages]
+        floored_shares = [int(s) for s in raw_shares]
+        remainders = [raw - floor for raw, floor in zip(raw_shares, floored_shares)]
+        unallocated = req.total_shares - sum(floored_shares)
+        sorted_indices = sorted(range(len(remainders)), key=lambda i: remainders[i], reverse=True)
+        for i in range(unallocated):
+            floored_shares[sorted_indices[i]] += 1
 
         return {
             "total_granted": req.total_shares,
             "schedule_model": req.schedule_type.value,
             "tranches": {
-                "year_1": floored[0],
-                "year_2": floored[1],
-                "year_3": floored[2],
-                "year_4": floored[3],
+                "year_1": floored_shares[0],
+                "year_2": floored_shares[1],
+                "year_3": floored_shares[2],
+                "year_4": floored_shares[3],
             },
-            "sum_invariant_verified": sum(floored) == req.total_shares
+            "sum_invariant_verified": sum(floored_shares) == req.total_shares
         }
 
     class BandStatus(str, Enum):
@@ -53,8 +62,8 @@ data:
 
     class SalaryAuditRequest(BaseModel):
         proposed_salary: float = Field(description="Proposed annual base salary in USD", gt=0)
-        job_level: str = Field(description="Synthetic IC level (e.g. 'IC2', 'IC3', 'IC4', 'IC5')")
-        location: str = Field(description="Synthetic pay zone code (e.g. 'US-ZONE-A', 'US-ZONE-B', 'US-ZONE-C')")
+        job_level: str = Field(description="Synthetic IC level")
+        location: str = Field(description="Synthetic pay zone code")
 
     SALARY_BANDS: Dict[tuple, Dict[str, float]] = {
         ("IC4", "US-ZONE-A"): {"min": 190000.0, "mid": 220000.0, "max": 250000.0},
@@ -90,11 +99,27 @@ data:
             "requires_exception_workflow": status_val == BandStatus.VP_APPROVAL_REQUIRED
         }
 
-    app = FastAPI(title="Compensation MCP Demo API", version="1.0.0")
+    app = FastAPI(title="Compensation MCP Demo API", version="1.1.0")
 
     @app.get("/healthz", status_code=status.HTTP_200_OK)
     async def health_check():
-        return {"status": "HEALTHY", "service": "compensation-mcp-engine"}
+        return {
+            "status": "HEALTHY",
+            "service": "compensation-mcp-engine",
+            "mcp_sse_endpoint": "/mcp/sse",
+            "mcp_messages_endpoint": "/mcp/messages/",
+        }
+
+    @app.get("/mcp/status", status_code=status.HTTP_200_OK)
+    async def mcp_status():
+        tools = await mcp.list_tools()
+        return {
+            "server": mcp.name,
+            "transport": "sse",
+            "sse_endpoint": "/mcp/sse",
+            "messages_endpoint": "/mcp/messages/",
+            "tools": [t.name for t in tools],
+        }
 
     @app.post("/api/v1/vesting")
     async def api_vesting(req: VestingRequest):
@@ -103,6 +128,27 @@ data:
     @app.post("/api/v1/salary-audit")
     async def api_salary_audit(req: SalaryAuditRequest):
         return audit_salary_band_compliance(req)
+
+    sse_transport = SseServerTransport("/mcp/messages/")
+
+    async def handle_mcp_sse(request):
+        async with sse_transport.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await mcp._mcp_server.run(
+                streams[0],
+                streams[1],
+                mcp._mcp_server.create_initialization_options(),
+            )
+
+    mcp_sse_app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_mcp_sse),
+            Mount("/messages/", app=sse_transport.handle_post_message),
+        ],
+    )
+
+    app.mount("/mcp", mcp_sse_app)
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -133,15 +179,35 @@ spec:
                   values:
                   - compensation-mcp
               topologyKey: kubernetes.io/hostname
-      containers:
-      - name: mcp-server
+      initContainers:
+      - name: ensure-venv
         image: python:3.13-slim
         command:
         - /bin/sh
         - -c
         - |
-          pip install --no-cache-dir fastapi==0.115.8 uvicorn==0.34.0 mcp==1.3.0 pydantic==2.10.6 starlette==0.45.3 && \
-          python -m uvicorn server:app --host 0.0.0.0 --port 8000 --app-dir /app
+          if [ ! -x /venv/bin/uvicorn ]; then
+            echo "Bootstrapping cached node virtualenv in /venv..."
+            python -m venv /venv && \
+            /venv/bin/pip install --no-cache-dir fastapi==0.115.8 uvicorn==0.34.0 mcp==1.3.0 pydantic==2.10.6 starlette==0.45.3
+          else
+            echo "Using cached node virtualenv in /venv."
+          fi
+        volumeMounts:
+        - name: venv-cache
+          mountPath: /venv
+      containers:
+      - name: mcp-server
+        image: python:3.13-slim
+        command:
+        - /venv/bin/uvicorn
+        - server:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8000"
+        - --app-dir
+        - /app
         ports:
         - containerPort: 8000
           name: http
@@ -149,13 +215,13 @@ spec:
           httpGet:
             path: /healthz
             port: 8000
-          initialDelaySeconds: 15
+          initialDelaySeconds: 5
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /healthz
             port: 8000
-          initialDelaySeconds: 5
+          initialDelaySeconds: 2
           periodSeconds: 5
         resources:
           limits:
@@ -167,10 +233,14 @@ spec:
         volumeMounts:
         - name: code-volume
           mountPath: /app
+        - name: venv-cache
+          mountPath: /venv
       volumes:
       - name: code-volume
         configMap:
           name: compensation-mcp-code
+      - name: venv-cache
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -198,6 +268,9 @@ metadata:
     cert-manager.io/cluster-issuer: homelab-ca-issuer
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 spec:
   ingressClassName: nginx
   tls:
