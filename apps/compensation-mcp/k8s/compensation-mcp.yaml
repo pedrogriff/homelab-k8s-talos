@@ -9,12 +9,17 @@ data:
     from typing import Dict, Any, List
     from fastapi import FastAPI, Response, status
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.server import StreamableHTTPASGIApp
     from mcp.server.sse import SseServerTransport
+    from mcp.server.transport_security import TransportSecuritySettings
     from pydantic import BaseModel, Field
-    from starlette.applications import Starlette
     from starlette.routing import Mount, Route
 
-    mcp = FastMCP("Compensation-MCP-Demo")
+    mcp = FastMCP(
+        "Compensation-MCP-Demo",
+        stateless_http=True,
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
 
     class VestingScheduleType(str, Enum):
         FRONT_LOADED_35_30_20_15 = "FRONT_LOADED_35_30_20_15"
@@ -99,13 +104,21 @@ data:
             "requires_exception_workflow": status_val == BandStatus.VP_APPROVAL_REQUIRED
         }
 
-    app = FastAPI(title="Compensation MCP Demo API", version="1.1.0")
+    _ = mcp.streamable_http_app()
+    streamable_http_asgi = StreamableHTTPASGIApp(mcp.session_manager)
+
+    app = FastAPI(
+        title="Compensation MCP Demo API",
+        version="1.2.0",
+        lifespan=lambda a: mcp.session_manager.run(),
+    )
 
     @app.get("/healthz", status_code=status.HTTP_200_OK)
     async def health_check():
         return {
             "status": "HEALTHY",
             "service": "compensation-mcp-engine",
+            "mcp_streamable_http_endpoint": "/mcp",
             "mcp_sse_endpoint": "/mcp/sse",
             "mcp_messages_endpoint": "/mcp/messages/",
         }
@@ -115,7 +128,8 @@ data:
         tools = await mcp.list_tools()
         return {
             "server": mcp.name,
-            "transport": "sse",
+            "transports": ["streamable-http", "sse"],
+            "streamable_http_endpoint": "/mcp",
             "sse_endpoint": "/mcp/sse",
             "messages_endpoint": "/mcp/messages/",
             "tools": [t.name for t in tools],
@@ -129,7 +143,10 @@ data:
     async def api_salary_audit(req: SalaryAuditRequest):
         return audit_salary_band_compliance(req)
 
-    sse_transport = SseServerTransport("/mcp/messages/")
+    sse_transport = SseServerTransport(
+        "/mcp/messages/",
+        security_settings=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
 
     async def handle_mcp_sse(request):
         async with sse_transport.connect_sse(
@@ -140,15 +157,12 @@ data:
                 streams[1],
                 mcp._mcp_server.create_initialization_options(),
             )
+        return Response()
 
-    mcp_sse_app = Starlette(
-        routes=[
-            Route("/sse", endpoint=handle_mcp_sse),
-            Mount("/messages/", app=sse_transport.handle_post_message),
-        ],
-    )
-
-    app.mount("/mcp", mcp_sse_app)
+    app.router.routes.append(Route("/mcp/sse", endpoint=handle_mcp_sse, methods=["GET"]))
+    app.router.routes.append(Mount("/mcp/messages", app=sse_transport.handle_post_message))
+    app.router.routes.append(Route("/mcp", endpoint=streamable_http_asgi))
+    app.router.routes.append(Route("/mcp/", endpoint=streamable_http_asgi))
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -189,7 +203,7 @@ spec:
           if [ ! -x /venv/bin/uvicorn ]; then
             echo "Bootstrapping cached node virtualenv in /venv..."
             python -m venv /venv && \
-            /venv/bin/pip install --no-cache-dir fastapi==0.115.8 uvicorn==0.34.0 mcp==1.3.0 pydantic==2.10.6 starlette==0.45.3
+            /venv/bin/pip install --no-cache-dir fastapi==0.115.8 uvicorn==0.34.0 mcp==1.26.0 pydantic==2.11.7 starlette==0.45.3
           else
             echo "Using cached node virtualenv in /venv."
           fi
@@ -266,7 +280,7 @@ metadata:
   namespace: default
   annotations:
     cert-manager.io/cluster-issuer: homelab-ca-issuer
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"

@@ -11,13 +11,18 @@ from enum import Enum
 from typing import Dict, Any, List
 from fastapi import FastAPI, Response, status
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from mcp.server.sse import SseServerTransport
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
-from starlette.applications import Starlette
 from starlette.routing import Mount, Route
 
-# 1. Initialize FastMCP Server
-mcp = FastMCP("Compensation-MCP-Demo")
+# 1. Initialize FastMCP Server (stateless Streamable HTTP + SSE support)
+mcp = FastMCP(
+    "Compensation-MCP-Demo",
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 # --- TOOL 1: Equity Vesting Calculation (Largest Remainder Method) ---
 
@@ -120,12 +125,17 @@ def audit_salary_band_compliance(req: SalaryAuditRequest) -> Dict[str, Any]:
         "requires_exception_workflow": status_val == BandStatus.VP_APPROVAL_REQUIRED
     }
 
-# --- 2. FastAPI Application Wrapper for Health Checks, REST & MCP SSE ---
+# --- 2. FastAPI Application Wrapper for Health Checks, REST, Streamable HTTP & MCP SSE ---
+
+# Initialize StreamableHTTPSessionManager via streamable_http_app()
+_ = mcp.streamable_http_app()
+streamable_http_asgi = StreamableHTTPASGIApp(mcp.session_manager)
 
 app = FastAPI(
     title="Compensation MCP Demo API",
-    version="1.1.0",
-    description="REST and MCP SSE endpoints for deterministic equity vesting and salary band tools."
+    version="1.2.0",
+    description="REST, MCP Streamable HTTP (2025-03-26), and MCP SSE (2024-11-05) endpoints for deterministic equity vesting and salary band tools.",
+    lifespan=lambda a: mcp.session_manager.run(),
 )
 
 @app.get("/healthz", status_code=status.HTTP_200_OK)
@@ -134,6 +144,7 @@ async def health_check():
     return {
         "status": "HEALTHY",
         "service": "compensation-mcp-engine",
+        "mcp_streamable_http_endpoint": "/mcp",
         "mcp_sse_endpoint": "/mcp/sse",
         "mcp_messages_endpoint": "/mcp/messages/",
     }
@@ -144,7 +155,8 @@ async def mcp_status():
     tools = await mcp.list_tools()
     return {
         "server": mcp.name,
-        "transport": "sse",
+        "transports": ["streamable-http", "sse"],
+        "streamable_http_endpoint": "/mcp",
         "sse_endpoint": "/mcp/sse",
         "messages_endpoint": "/mcp/messages/",
         "tools": [t.name for t in tools],
@@ -160,8 +172,11 @@ async def api_salary_audit(req: SalaryAuditRequest):
     """Direct REST endpoint for salary band compliance audit."""
     return audit_salary_band_compliance(req)
 
-# --- 3. Mount Live MCP SSE Transport at /mcp ---
-sse_transport = SseServerTransport("/mcp/messages/")
+# --- 3. Mount Live MCP Streamable HTTP (/mcp) & SSE (/mcp/sse, /mcp/messages/) ---
+sse_transport = SseServerTransport(
+    "/mcp/messages/",
+    security_settings=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 async def handle_mcp_sse(request):
     async with sse_transport.connect_sse(
@@ -172,12 +187,9 @@ async def handle_mcp_sse(request):
             streams[1],
             mcp._mcp_server.create_initialization_options(),
         )
+    return Response()
 
-mcp_sse_app = Starlette(
-    routes=[
-        Route("/sse", endpoint=handle_mcp_sse),
-        Mount("/messages/", app=sse_transport.handle_post_message),
-    ],
-)
-
-app.mount("/mcp", mcp_sse_app)
+app.router.routes.append(Route("/mcp/sse", endpoint=handle_mcp_sse, methods=["GET"]))
+app.router.routes.append(Mount("/mcp/messages", app=sse_transport.handle_post_message))
+app.router.routes.append(Route("/mcp", endpoint=streamable_http_asgi))
+app.router.routes.append(Route("/mcp/", endpoint=streamable_http_asgi))

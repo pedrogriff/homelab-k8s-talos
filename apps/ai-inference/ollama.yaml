@@ -1,9 +1,10 @@
 # ==============================================================================
 # In-Cluster Ollama AI Inference & Embedding Engine
 # ==============================================================================
-# Runs on the high-memory node (talos-k7w-qm2: 16 vCPU, 20 GiB RAM, 275 GB Disk)
-# with a persistent 30Gi local-path volume for model weights and warm-cache
-# settings tuned for agentic workflows (ReAct, Tree-of-Thought, RAG embeddings).
+# Runs on the high-memory node (talos-k7w-qm2: 16 vCPU i7-11850H AVX-512 VNNI,
+# 16 GiB RAM, 275 GB Disk) with a persistent 30Gi local-path volume for model
+# weights and KV-cache / context-window settings tuned for coding harnesses
+# (opencode, agy, comp-insight-advisor, people-agent-mesh).
 # ==============================================================================
 
 apiVersion: v1
@@ -40,7 +41,7 @@ spec:
       labels:
         app: ollama
     spec:
-      # Pin to talos-k7w-qm2 where 16 vCPUs, 14+ GiB free RAM, and 249 GB disk reside
+      # Pin to talos-k7w-qm2 where 16 vCPUs (AVX-512 VNNI), 11.5+ GiB free RAM, and 245 GB disk reside
       nodeSelector:
         kubernetes.io/hostname: talos-k7w-qm2
       containers:
@@ -61,6 +62,12 @@ spec:
               value: "2"
             - name: OLLAMA_FLASH_ATTENTION
               value: "1"
+            - name: OLLAMA_KV_CACHE_TYPE
+              value: "q8_0"
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "16384"
+            - name: OLLAMA_NUM_THREADS
+              value: "8"
           lifecycle:
             postStart:
               exec:
@@ -71,6 +78,8 @@ spec:
                     (
                       until ollama list >/dev/null 2>&1; do sleep 2; done
                       ollama pull nomic-embed-text || true
+                      ollama pull llama3.2:3b || true
+                      ollama pull qwen2.5-coder:7b || true
                     ) >/proc/1/fd/1 2>&1 &
           readinessProbe:
             httpGet:
@@ -86,11 +95,11 @@ spec:
             periodSeconds: 20
           resources:
             requests:
-              cpu: 500m
-              memory: 1Gi
+              cpu: 1000m
+              memory: 2Gi
             limits:
-              cpu: "8"
-              memory: 10Gi
+              cpu: "14"
+              memory: 12Gi
           volumeMounts:
             - name: ollama-models
               mountPath: /root/.ollama

@@ -22,8 +22,8 @@ A secure, immutable, declarative **Multi-Node Kubernetes (v1.36)** infrastructur
 ## What runs on this cluster
 The `homelab-apps` Application in `infrastructure/gitops/homelab-apps.yaml` tells ArgoCD to deploy every manifest under `apps/`. These are the apps it runs:
 - [comp-flow-platform](https://github.com/pedrogriff/comp-flow-platform), from `apps/comp-flow-platform/`: 2 API replicas, Postgres 16 on a 10Gi volume, Redis 7, an ingress, a Prometheus ServiceMonitor, SLO and burn-rate alert rules, and a Grafana dashboard.
-- The compensation MCP service, from `apps/compensation-mcp/`, on synthetic data. It exposes both REST endpoints (`/api/v1/vesting`, `/api/v1/salary-audit`) and a live Model Context Protocol (MCP) SSE transport at `/mcp/sse` and `/mcp/messages/`. Its vesting tool splits a grant into 4 yearly tranches with the largest remainder method, the same method as [vesting-sim-engine](https://github.com/pedrogriff/vesting-sim-engine).
-- In-cluster AI inference & vector storage, from `apps/ai-inference/`: **Ollama** (`ollama.10.0.0.170.nip.io`) on a 30Gi persistent volume preloaded with `nomic-embed-text`, and **pgvector** (`ai-pgvector` on PostgreSQL 16 with the `vector` 0.8.6 extension) on a 5Gi volume.
+- The compensation MCP service, from `apps/compensation-mcp/`, on synthetic data. It exposes REST endpoints (`/api/v1/vesting`, `/api/v1/salary-audit`), a stateless Model Context Protocol (MCP) Streamable HTTP endpoint at `/mcp` (`2025-03-26` spec), and a legacy MCP SSE transport at `/mcp/sse` and `/mcp/messages/`. Its vesting tool splits a grant into 4 yearly tranches with the largest remainder method, the same method as [vesting-sim-engine](https://github.com/pedrogriff/vesting-sim-engine).
+- In-cluster AI inference & vector storage, from `apps/ai-inference/`: **Ollama** (`ollama.10.0.0.170.nip.io`) on a 30Gi persistent volume (tuned with 16k context window, `q8_0` KV cache, and AVX-512 VNNI acceleration, preloaded with `qwen2.5-coder:7b`, `llama3.2:3b`, and `nomic-embed-text`), and **pgvector** (`ai-pgvector` on PostgreSQL 16 with the `vector` 0.8.6 extension) on a 5Gi volume.
 - Uptime Kuma from `apps/monitoring/` and a 3-replica podinfo test app from `apps/demo/`.
 My current project is [comp-insight-advisor](https://github.com/pedrogriff/comp-insight-advisor). I plan to serve its deterministic tools from this cluster.
 
@@ -143,7 +143,7 @@ flowchart TD
 
 ### 9. Why a separate service for deterministic tools?
 * **Math stays out of the model.** An LLM agent can call the vesting and salary band tools instead of doing the arithmetic itself.
-* **REST and MCP SSE.** The service exposes the tools both as REST endpoints (`/api/v1/vesting` and `/api/v1/salary-audit`) and as a live FastMCP Server-Sent Events (SSE) endpoint at `/mcp/sse` (with tool metadata at `/mcp/status`), routed through NGINX Ingress with proxy buffering disabled.
+* **REST, MCP Streamable HTTP, and MCP SSE.** The service exposes the tools as REST endpoints (`/api/v1/vesting` and `/api/v1/salary-audit`), as a stateless FastMCP Streamable HTTP endpoint at `/mcp`, and as a Server-Sent Events (SSE) endpoint at `/mcp/sse` (with tool metadata at `/mcp/status`), routed through NGINX Ingress with proxy buffering disabled.
 
 ### 10. Why Centralized Identity & Role-Based Access Control (Authentik OIDC SSO)?
 * **Eliminates Identity Fragmentation:** Centralizes user accounts, MFA, and access revocation in a unified IdP.
